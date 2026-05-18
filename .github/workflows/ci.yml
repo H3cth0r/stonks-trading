@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Run tests with coverage
+      run: |
+        pytest --cov=stonks_trading --cov-report=xml --cov-report=term
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Run Ruff linter
+      run: |
+        ruff check src/stonks_trading
+
+    - name: Run Ruff format check
+      run: |
+        ruff format --check src/stonks_trading
+
+  type-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Run mypy type checker
+      run: |
+        mypy src/stonks_trading --strict
+
+  verify-patterns:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Verify no TYPE_CHECKING imports
+      run: |
+        if grep -r "TYPE_CHECKING" src/; then
+          echo "ERROR: Found TYPE_CHECKING imports"
+          exit 1
+        fi
+        echo "✓ No TYPE_CHECKING imports found"
+
+    - name: Verify no string type annotations
+      run: |
+        if grep -rn ':\s*"' src/domains/; then
+          echo "ERROR: Found string type annotations"
+          exit 1
+        fi
+        echo "✓ No string type annotations found"
+
+    - name: Verify domain has no FastAPI imports
+      run: |
+        if grep -r "from fastapi" src/domains/; then
+          echo "ERROR: Found FastAPI imports in domain layer"
+          exit 1
+        fi
+        echo "✓ No FastAPI imports in domain layer"
+
+    - name: Verify repositories use standalone functions
+      run: |
+        if grep -n "class.*Repository" src/domains/trading/repositories.py; then
+          echo "ERROR: Found repository classes (should be standalone functions)"
+          exit 1
+        fi
+        echo "✓ Repositories use standalone functions"

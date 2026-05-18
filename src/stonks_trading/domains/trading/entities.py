@@ -1,0 +1,330 @@
+"""Domain entities for trading domain.
+
+Entities are pure dataclasses with zero framework dependencies.
+They represent core business objects with identity and behavior.
+
+Key principle: Domain entities have no imports from outer layers.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+from stonks_trading.domains.trading.enums import RiskLevel, Side
+from stonks_trading.domains.trading.value_objects import Money, Symbol
+
+
+@dataclass
+class ExecuteTradeResult:
+    """Result of trade execution.
+
+    Domain entity representing the outcome of executing a trade.
+    Returned by ExecuteTradeUseCase.
+    """
+
+    success: bool
+    trade: Trade | None = None
+    position: Position | None = None
+    risk_check: RiskCheckResult | None = None
+    error: str | None = None
+
+
+@dataclass
+class EvaluateSignalResult:
+    """Result of signal evaluation.
+
+    Domain entity representing the outcome of evaluating a NEAT signal.
+    Returned by EvaluateSignalUseCase.
+    """
+
+    action: Side | None
+    confidence: float
+    should_trade: bool
+    reason: str | None = None
+
+
+@dataclass
+class CheckRiskResult:
+    """Result of risk monitoring check.
+
+    Domain entity representing the outcome of a risk check.
+    Returned by MonitorRiskUseCase.
+    """
+
+    status: RiskLevel
+    events: list[RiskEvent]
+    should_halt: bool
+
+
+@dataclass
+class OrderResult:
+    """Result of order execution.
+
+    Represents the outcome of placing an order through an exchange.
+    Domain entity that is returned by adapters and processed by use cases.
+    """
+
+    success: bool
+    order_id: str | None = None
+    fill_price: Money | None = None
+    filled_quantity: float = 0.0
+    fee: Money | None = None
+    error: str | None = None
+    timestamp: datetime | None = None
+
+
+@dataclass
+class Balance:
+    """Account balance for an asset.
+
+    Represents cash or asset holdings from an exchange account.
+    Domain entity used by adapters and use cases.
+    """
+
+    asset: str
+    free: float
+    locked: float
+    total: float
+
+
+@dataclass
+class RiskCheckResult:
+    """Result of risk check.
+
+    Pure dataclass representing the outcome of a risk validation.
+    Used by RiskChecker service and returned to use cases.
+    """
+
+    allowed: bool
+    reason: str | None = None
+    risk_level: RiskLevel = RiskLevel.OK
+
+
+@dataclass
+class Trade:
+    """Trade entity - pure dataclass with zero framework dependencies.
+
+    Represents a completed trade execution with all relevant
+    details for P&L calculation and tax reporting.
+
+    Note:
+        - unrealized_pnl_pct is for NEAT state vector (matches NEAT/main.py)
+        - realized_pnl is ONLY for tax/SAT export, NOT trading logic
+    """
+
+    symbol: Symbol
+    side: Side
+    fill_price: Money
+    quantity: float
+    fee: Money
+    # Tax only, not NEAT
+    realized_pnl: Money | None = None
+    id: int | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    order_id: str | None = None
+    venue_trade_id: str | None = None
+
+    def calculate_value(self) -> Money:
+        """Calculate total value of trade (price * quantity)."""
+        return Money(
+            amount=self.fill_price.amount * self.quantity,
+            currency=self.fill_price.currency,
+        )
+
+    def calculate_cost_basis(self) -> Money:
+        """Calculate cost basis including fees."""
+        value = self.calculate_value()
+        if self.side == Side.BUY:
+            return value + self.fee
+        return value - self.fee
+
+    def get_notional(self) -> Money:
+        """Get notional value (price * quantity)."""
+        return self.calculate_value()
+
+
+@dataclass
+class Position:
+    """Position entity representing current holdings.
+
+    Tracks open position state including entry price,
+    quantity, and unrealized P&L for NEAT state vector.
+    """
+
+    symbol: Symbol
+    quantity: float = 0.0
+    entry_price: Money | None = None
+    id: int | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+
+    def is_open(self) -> bool:
+        """Check if position has non-zero quantity."""
+        return self.quantity > 0
+
+    def calculate_unrealized_pnl(self, current_price: Money) -> Money:
+        """Calculate unrealized P&L at current price."""
+        if not self.is_open() or self.entry_price is None:
+            return Money(amount=0.0, currency=current_price.currency)
+
+        price_diff = current_price.amount - self.entry_price.amount
+        return Money(
+            amount=price_diff * self.quantity,
+            currency=current_price.currency,
+        )
+
+    def calculate_unrealized_pnl_pct(self, current_price: Money) -> float:
+        """Calculate unrealized P&L percentage for NEAT state vector.
+
+        This matches the calculation in NEAT/main.py line 122:
+        unrealized_pnl = (price - entry_price) / entry_price
+        """
+        if not self.is_open() or self.entry_price is None:
+            return 0.0
+
+        if self.entry_price.amount == 0:
+            return 0.0
+
+        return (current_price.amount - self.entry_price.amount) / self.entry_price.amount
+
+    def calculate_market_value(self, current_price: Money) -> Money:
+        """Calculate current market value of position."""
+        return Money(
+            amount=self.quantity * current_price.amount,
+            currency=current_price.currency,
+        )
+
+    def add_to_position(self, quantity: float, price: Money) -> None:
+        """Add to existing position with average price update."""
+        if self.quantity == 0:
+            self.entry_price = price
+            self.quantity = quantity
+        else:
+            # Calculate new average entry price
+            current_value = self.quantity * (self.entry_price.amount if self.entry_price else 0)
+            new_value = quantity * price.amount
+            total_quantity = self.quantity + quantity
+            avg_price = (current_value + new_value) / total_quantity
+
+            self.entry_price = Money(amount=avg_price, currency=price.currency)
+            self.quantity = total_quantity
+
+        self.updated_at = datetime.utcnow()
+
+    def reduce_position(self, quantity: float) -> None:
+        """Reduce position by quantity."""
+        if quantity >= self.quantity:
+            self.quantity = 0.0
+            self.entry_price = None
+        else:
+            self.quantity -= quantity
+
+        self.updated_at = datetime.utcnow()
+
+
+@dataclass
+class Genome:
+    """NEAT genome entity for persistence and retrieval.
+
+    Stores a trained NEAT genome with its metadata
+    for reproduction and continued training.
+    """
+
+    genome_data: bytes  # Pickled genome object
+    id: int | None = None
+    fitness: float = 0.0
+    generation: int = 0
+    symbol: Symbol | None = None
+    # Training parameters used (must match NEAT/main.py for parity)
+    fee_rate: float = 0.001
+    slippage_bps: int = 0
+    mode: str = "backtest"  # backtest, dry_run, live
+    # Metadata
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    is_active: bool = False
+    trades_count: int = 0
+    max_drawdown: float = 0.0
+    total_return: float = 0.0
+    notes: str | None = None
+
+    def get_config_summary(self) -> dict[str, Any]:
+        """Get training configuration summary for display."""
+        return {
+            "fee_rate": self.fee_rate,
+            "slippage_bps": self.slippage_bps,
+            "mode": self.mode,
+            "fitness": self.fitness,
+            "generation": self.generation,
+        }
+
+
+@dataclass
+class RiskEvent:
+    """Risk event entity for audit trail and notifications.
+
+    Tracks risk-related events like drawdown breaches,
+    limit violations, and kill switch triggers.
+    """
+
+    event_type: str  # drawdown_breach, trade_limit, kill_switch, etc.
+    severity: str  # warning, critical, emergency
+    message: str
+    id: int | None = None
+    symbol: Symbol | None = None
+    metric_name: str | None = None
+    metric_value: float | None = None
+    threshold_value: float | None = None
+    # Context
+    portfolio_value: Money | None = None
+    position_value: Money | None = None
+    # Audit
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    acknowledged_at: datetime | None = None
+    acknowledged_by: str | None = None
+    action_taken: str | None = None
+
+    def acknowledge(self, user: str, action: str | None = None) -> None:
+        """Mark risk event as acknowledged."""
+        self.acknowledged_at = datetime.utcnow()
+        self.acknowledged_by = user
+        self.action_taken = action
+
+
+@dataclass
+class MarketData:
+    """Market data entity for a single candle/bar.
+
+    Immutable representation of OHLCV data.
+    """
+
+    symbol: Symbol
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    # Optional features (pre-computed)
+    trend_1h: float | None = None
+    rsi_1h: float | None = None
+    rsi_15m: float | None = None
+    roc: float | None = None
+    bb_width: float | None = None
+
+    def get_ohlcv(self) -> tuple[float, float, float, float, float]:
+        """Return OHLCV tuple."""
+        return (self.open, self.high, self.low, self.close, self.volume)
+
+    def price_range(self) -> float:
+        """Calculate price range (high - low)."""
+        return self.high - self.low
+
+    def is_bullish(self) -> bool:
+        """Check if close > open (bullish candle)."""
+        return self.close > self.open
+
+    def is_bearish(self) -> bool:
+        """Check if close < open (bearish candle)."""
+        return self.close < self.open
