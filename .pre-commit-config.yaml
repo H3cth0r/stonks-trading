@@ -1,0 +1,49 @@
+# Pre-commit hooks configuration
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Ruff - Python linting and formatting (replaces flake8, black, isort)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      # Run linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^src/
+      # Run formatter
+      - id: ruff-format
+        files: ^src/
+
+  # MyPy - Type checking (Phase 1: only check core domain files)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.1.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic>=2.5.0
+          - pydantic-settings>=2.1.0
+          - types-requests
+        args: [--strict, --ignore-missing-imports, --show-error-codes]
+        files: ^src/stonks_trading/
+        exclude: ^src/stonks_trading/domains/trading/(tests|neat)/.*|^src/stonks_trading/(shared|domains/trading)/(routes|adapters|postgres_models|database|testing)
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Prevent large files
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      # Check for merge conflicts
+      - id: check-merge-conflict
+      # Check JSON syntax
+      - id: check-json
+      # Check YAML syntax
+      - id: check-yaml
+      # Check TOML syntax
+      - id: check-toml
+      # Trim trailing whitespace
+      - id: trailing-whitespace
+      # Ensure files end with newline
+      - id: end-of-file-fixer
