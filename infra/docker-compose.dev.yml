@@ -1,0 +1,116 @@
+# Docker Compose for local development
+#
+# Provides:
+# - MinIO (S3-compatible storage for local Tigris replacement)
+# - PostgreSQL (for local Neon replacement)
+#
+# Usage:
+#   cd infra && docker-compose -f docker-compose.dev.yml up -d
+#   # MinIO console: http://localhost:9001 (minioadmin/minioadmin)
+#   # PostgreSQL: localhost:5432
+#
+# To stop:
+#   docker-compose -f docker-compose.dev.yml down
+
+version: '3.8'
+
+services:
+  # MinIO: S3-compatible storage for local development
+  # Replaces Tigris in local dev environment
+  minio:
+    image: minio/minio:latest
+    container_name: stonks-minio
+    ports:
+      - "9000:9000"  # S3 API endpoint
+      - "9001:9001"  # MinIO Console (Web UI)
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ':9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - stonks-network
+
+  # MinIO bucket initialization
+  # Creates the required bucket on startup
+  minio-init:
+    image: minio/mc:latest
+    container_name: stonks-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Setting up MinIO...' &&
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb local/stonks-trading-data --ignore-existing &&
+      mc policy set public local/stonks-trading-data &&
+      echo 'MinIO setup complete'
+      "
+    networks:
+      - stonks-network
+
+  # PostgreSQL: For local database development
+  # Replaces Neon in local dev environment
+  postgres:
+    image: postgres:15-alpine
+    container_name: stonks-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: stonks
+      POSTGRES_PASSWORD: stonks
+      POSTGRES_DB: stonks_trading
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stonks -d stonks_trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stonks-network
+
+  # Data Pipeline Service (optional - for testing ingestion)
+  # Uncomment to run data pipeline in container
+  # data-pipeline:
+  #   build:
+  #     context: ..
+  #     dockerfile: infra/Dockerfile.data
+  #   container_name: stonks-data-pipeline
+  #   environment:
+  #     - DATABASE_URL=postgresql://stonks:stonks@postgres:5432/stonks_trading
+  #     - DUCKDB_PATH=/data/neat.db
+  #     # Use MinIO for local S3 (production uses Tigris)
+  #     - S3_ENDPOINT=http://minio:9000
+  #     - S3_ACCESS_KEY=minioadmin
+  #     - S3_SECRET_KEY=minioadmin
+  #     - S3_BUCKET=stonks-trading-data
+  #     - MARKET_DATA_PROVIDER=binance
+  #     - LOG_LEVEL=DEBUG
+  #   volumes:
+  #     - ../data:/data
+  #     - ../src:/app/src:ro
+  #   depends_on:
+  #     - minio
+  #     - minio-init
+  #     - postgres
+  #   networks:
+  #     - stonks-network
+  #   command: python -m stonks_trading.shared.ingest.cli ingest --symbols BTC_USD --testnet
+
+volumes:
+  minio_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+networks:
+  stonks-network:
+    driver: bridge

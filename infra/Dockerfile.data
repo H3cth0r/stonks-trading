@@ -1,0 +1,38 @@
+# Dockerfile for Data Pipeline
+#
+# Used for running the data ingestion pipeline in a containerized environment.
+# Can be used locally with docker-compose or deployed to Fly.io.
+
+FROM python:3.11-slim
+
+# Prevent Python from writing pyc files and buffering stdout
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files first (for better caching)
+COPY pyproject.toml ./
+
+# Copy source code
+COPY src/ ./src/
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -e ".[dev]"
+
+# Create data directory
+RUN mkdir -p /data
+
+# Run as non-root user for security
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app /data
+USER appuser
+
+# Default command (can be overridden)
+CMD ["python", "-m", "stonks_trading.shared.ingest.cli", "--help"]
