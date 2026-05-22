@@ -4,7 +4,12 @@ Use cases orchestrate business logic by calling services and repositories.
 They contain no direct SQL or HTTP calls.
 """
 
+from datetime import datetime
+from typing import Any
+
+from stonks_trading.domains.trading.adapters import IExchangeAdapter
 from stonks_trading.domains.trading.entities import (
+    Balance,
     CheckRiskResult,
     EvaluateSignalResult,
     ExecuteTradeResult,
@@ -322,4 +327,242 @@ class MonitorRiskUseCase:
             status=status,
             events=events,
             should_halt=should_halt,
+        )
+
+
+class FetchBalancesUseCase:
+    """Fetch account balances from exchange.
+
+    Orchestrates adapter call and mapping to domain entities.
+    """
+
+    def __init__(self, adapter: IExchangeAdapter):
+        self.adapter = adapter
+
+    async def execute(self) -> list[Balance]:
+        """Fetch balances from configured exchange."""
+        result = await self.adapter.get_balance()
+        if isinstance(result, Balance):
+            return [result]
+        return result
+
+
+class GetMarketDataUseCase:
+    """Get current market price for a symbol."""
+
+    def __init__(self, adapter: IExchangeAdapter):
+        self.adapter = adapter
+
+    async def execute(self, symbol: Symbol) -> Money:
+        """Get current price."""
+        return await self.adapter.get_price(symbol)
+
+
+class FetchFeesUseCase:
+    """Fetch and cache live fee tier from exchange."""
+
+    def __init__(self, adapter: IExchangeAdapter, fee_calculator: FeeCalculator):
+        self.adapter = adapter
+        self.fee_calculator = fee_calculator
+
+    async def execute(self) -> dict[str, float]:
+        """Refresh fee tier and return rates."""
+        tier = await self.fee_calculator.refresh_tier(self.adapter)
+        return {"maker_rate": tier.maker_rate, "taker_rate": tier.taker_rate}
+
+
+class GetCandlesUseCase:
+    """Get OHLCV candles for a symbol from exchange."""
+
+    def __init__(self, adapter: IExchangeAdapter):
+        self.adapter = adapter
+
+    async def execute(
+        self,
+        symbol: Symbol,
+        interval: str = "1m",
+        limit: int = 100,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch candles from exchange.
+
+        Args:
+            symbol: Trading symbol (canonical)
+            interval: Candle interval (1m, 5m, 1h, 1d)
+            limit: Number of candles to fetch
+            start: Start time (optional)
+            end: End time (optional)
+
+        Returns:
+            List of OHLCV candle dictionaries
+        """
+        # Convert datetime to milliseconds timestamp if provided
+        start_time = int(start.timestamp() * 1000) if start else None
+        end_time = int(end.timestamp() * 1000) if end else None
+
+        candles = await self.adapter.get_klines(
+            symbol=symbol,
+            interval=interval,
+            limit=limit,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+        return candles
+
+
+class PlaceOrderUseCase:
+    """Place order on exchange via adapter.
+
+    Orchestrates the full order flow: price fetch, risk check,
+    order placement, and persistence. This is the CLEAN architecture
+    way to handle exchange interaction from the API layer.
+    """
+
+    def __init__(
+        self,
+        adapter: IExchangeAdapter,
+        risk_checker: RiskChecker,
+        fee_calculator: FeeCalculator,
+    ):
+        self.adapter = adapter
+        self.risk_checker = risk_checker
+        self.fee_calculator = fee_calculator
+
+    async def execute(
+        self,
+        symbol: Symbol,
+        side: Side,
+        quantity: float,
+        price: Money | None,
+        current_position: Position | None,
+        daily_trade_count: int,
+        minutes_since_last_trade: int,
+        current_drawdown: float = 0.0,
+        daily_loss_pct: float = 0.0,
+        in_safe_mode: bool = False,
+    ) -> ExecuteTradeResult:
+        """Execute trade with exchange adapter.
+
+        Args:
+            symbol: Trading symbol (canonical)
+            side: Buy or sell
+            quantity: Amount to trade
+            price: Optional limit price (None for market orders)
+            current_position: Existing position if any
+            daily_trade_count: Trades executed today
+            minutes_since_last_trade: Time since last trade
+            current_drawdown: Current portfolio drawdown
+            daily_loss_pct: Daily loss percentage
+            in_safe_mode: Whether safe mode is active
+
+        Returns:
+            ExecuteTradeResult with trade details or error
+        """
+
+        # Get current price from exchange
+        current_price = await self.adapter.get_price(symbol)
+        execution_price = price or current_price
+
+        # Calculate notional value
+        notional = Money(
+            amount=execution_price.amount * quantity,
+            currency=execution_price.currency,
+        )
+
+        # Get portfolio value from exchange balances
+        balances = await self.adapter.get_balance()
+        if isinstance(balances, Balance):
+            balances = [balances]
+        total_value = sum(b.total for b in balances)
+        portfolio_value = Money(amount=total_value, currency=execution_price.currency)
+
+        # Risk check
+        risk_result = self.risk_checker.check_trade(
+            side=side,
+            notional=notional,
+            portfolio_value=portfolio_value,
+            current_position=current_position,
+            daily_trade_count=daily_trade_count,
+            minutes_since_last_trade=minutes_since_last_trade,
+            current_drawdown=current_drawdown,
+            daily_loss_pct=daily_loss_pct,
+            in_safe_mode=in_safe_mode,
+        )
+
+        if not risk_result.allowed:
+            return ExecuteTradeResult(
+                success=False,
+                risk_check=risk_result,
+                error=f"Risk check failed: {risk_result.reason}",
+            )
+
+        # Place order on exchange
+        order_result = await self.adapter.place_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type="market" if price is None else "limit",
+            price=execution_price if price else None,
+        )
+
+        if not order_result.success:
+            return ExecuteTradeResult(
+                success=False,
+                risk_check=risk_result,
+                error=f"Order failed: {order_result.error}",
+            )
+
+        # Calculate fee based on fill
+        fill_notional = Money(
+            amount=(
+                order_result.fill_price.amount
+                if order_result.fill_price
+                else execution_price.amount
+            )
+            * order_result.filled_quantity,
+            currency=execution_price.currency,
+        )
+        fee = self.fee_calculator.calculate_fee(fill_notional, is_maker=False)
+
+        # Create trade entity from order result
+        trade = Trade(
+            symbol=symbol,
+            side=side,
+            fill_price=order_result.fill_price or execution_price,
+            quantity=order_result.filled_quantity,
+            fee=fee,
+            order_id=order_result.order_id,
+        )
+
+        # Persist trade
+        saved_trade = await save_trade(trade)
+
+        # Update position
+        if side == Side.BUY:
+            if current_position:
+                current_position.add_to_position(
+                    order_result.filled_quantity, order_result.fill_price or execution_price
+                )
+            else:
+                current_position = Position(
+                    symbol=symbol,
+                    quantity=order_result.filled_quantity,
+                    entry_price=order_result.fill_price or execution_price,
+                )
+        else:  # SELL
+            if current_position:
+                current_position.reduce_position(order_result.filled_quantity)
+
+        if current_position:
+            saved_position = await save_position(current_position)
+        else:
+            saved_position = None
+
+        return ExecuteTradeResult(
+            success=True,
+            trade=saved_trade,
+            position=saved_position,
+            risk_check=risk_result,
         )

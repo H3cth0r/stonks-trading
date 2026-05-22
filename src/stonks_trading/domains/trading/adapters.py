@@ -8,6 +8,12 @@ Implements the adapter pattern for multiple venues:
 - DryRun (paper trading simulation)
 """
 
+import asyncio
+import hashlib
+import hmac
+import random
+import time
+import urllib.parse
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any
@@ -16,6 +22,7 @@ import httpx
 
 from stonks_trading.domains.trading.entities import Balance, OrderResult
 from stonks_trading.domains.trading.enums import Side
+from stonks_trading.domains.trading.services import InstrumentMapper
 from stonks_trading.domains.trading.value_objects import Money, Symbol
 
 
@@ -103,11 +110,58 @@ class IExchangeAdapter(ABC):
         """
         pass
 
+    @abstractmethod
+    async def get_fee_tier(self) -> dict[str, Any]:
+        """Get current fee tier from exchange.
+
+        Returns:
+            Fee tier information (maker/taker rates)
+        """
+        pass
+
+    @abstractmethod
+    async def get_exchange_info(self) -> dict[str, Any]:
+        """Get exchange symbol filters (lot size, min notional, tick size).
+
+        Returns:
+            Exchange info including symbol filters
+        """
+        pass
+
+    @abstractmethod
+    async def get_klines(
+        self,
+        symbol: Symbol,
+        interval: str = "1m",
+        limit: int = 100,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get OHLCV klines/candles for symbol.
+
+        Args:
+            symbol: Trading symbol
+            interval: Candle interval (1m, 5m, 1h, 1d, etc.)
+            limit: Number of candles to fetch (max 1000)
+            start_time: Start time in milliseconds (optional)
+            end_time: End time in milliseconds (optional)
+
+        Returns:
+            List of OHLCV candles
+        """
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close HTTP client and cleanup."""
+        pass
+
 
 class BinanceAdapter(IExchangeAdapter):
-    """Binance exchange adapter.
+    """Binance Spot REST adapter with HMAC-SHA256 signing.
 
-    Implements REST API integration for Binance Spot trading.
+    Uses the configured base_url (testnet or live).
+    Respects rate limits with exponential backoff on 429/418.
     """
 
     def __init__(
@@ -116,20 +170,63 @@ class BinanceAdapter(IExchangeAdapter):
         api_secret: str,
         base_url: str = "https://api.binance.com",
     ):
-        """Initialize Binance adapter.
-
-        Args:
-            api_key: Binance API key
-            api_secret: Binance API secret
-            base_url: Binance API base URL
-        """
         self.api_key = api_key
-        self.api_secret = api_secret
+        self.api_secret = api_secret.encode("utf-8")
         self.base_url = base_url.rstrip("/")
         self.client = httpx.AsyncClient(
             headers={"X-MBX-APIKEY": api_key},
             timeout=30.0,
         )
+        self.instrument_mapper = InstrumentMapper()
+        self._exchange_info: dict[str, Any] | None = None
+
+    def _sign(self, params: dict[str, Any]) -> str:
+        """HMAC-SHA256 sign query parameters."""
+        query = urllib.parse.urlencode(params)
+        return hmac.new(
+            self.api_secret,
+            query.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    async def _signed_request(
+        self,
+        method: str,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make signed request with timestamp and recvWindow."""
+        params = params or {}
+        params["timestamp"] = int(time.time() * 1000)
+        params["recvWindow"] = 5000
+        params["signature"] = self._sign(params)
+
+        url = f"{self.base_url}{endpoint}"
+
+        if method.upper() == "GET":
+            response = await self.client.get(url, params=params)
+        else:
+            response = await self.client.request(method, url, data=params)
+
+        # Handle rate limits
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", 60))
+            await asyncio.sleep(retry_after)
+            return await self._signed_request(method, endpoint, params)
+
+        response.raise_for_status()
+        return response.json()
+
+    async def _public_request(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make unsigned public request."""
+        url = f"{self.base_url}{endpoint}"
+        response = await self.client.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
 
     async def place_order(
         self,
@@ -139,85 +236,188 @@ class BinanceAdapter(IExchangeAdapter):
         order_type: str = "market",
         price: Money | None = None,
     ) -> OrderResult:
-        """Place order on Binance."""
+        """Place signed order on Binance Spot."""
+        venue_symbol = self.instrument_mapper.to_venue_symbol(symbol, "binance")
+
         params: dict[str, Any] = {
-            "symbol": symbol.value.upper(),
+            "symbol": venue_symbol.value.upper(),
             "side": side.value.upper(),
             "type": order_type.upper(),
-            "quantity": quantity,
         }
 
-        if order_type.lower() == "limit" and price:
-            params["price"] = price.amount
+        if order_type.lower() == "market":
+            params["quantity"] = quantity
+        elif order_type.lower() == "limit" and price:
+            params["price"] = f"{price.amount:.8f}"
             params["timeInForce"] = "GTC"
+            params["quantity"] = quantity
 
-        try:
-            # In production, would sign request and make actual API call
-            # response = await self._signed_request("POST", endpoint, params)
+        data = await self._signed_request("POST", "/api/v3/order", params)
 
-            # Stub for Phase 1
-            return OrderResult(
-                success=True,
-                order_id=f"binance_stub_{datetime.utcnow().timestamp()}",
-                fill_price=price or Money(amount=50000.0, currency="USD"),
-                filled_quantity=quantity,
-                fee=Money(
-                    amount=quantity * (price.amount if price else 50000.0) * 0.001, currency="USD"
-                ),
-                timestamp=datetime.utcnow(),
-            )
-        except Exception as e:
+        if "orderId" not in data:
             return OrderResult(
                 success=False,
-                error=str(e),
+                error=data.get("msg", "Unknown error"),
             )
+
+        # Binance returns order status immediately for market orders
+        # For fills, query myTrades or wait for User Data Stream
+        fill_price = None
+        filled_qty = 0.0
+        fee = None
+
+        if data.get("status") == "FILLED" and "fills" in data:
+            fills = data["fills"]
+            if fills:
+                # Weighted average fill price
+                total_qty = sum(float(f["qty"]) for f in fills)
+                total_notional = sum(float(f["qty"]) * float(f["price"]) for f in fills)
+                avg_price = total_notional / total_qty if total_qty > 0 else 0.0
+                total_fee = sum(float(f["commission"]) for f in fills)
+                fee_currency = fills[0].get("commissionAsset", "USDT")
+
+                fill_price = Money(amount=avg_price, currency="USDT")
+                filled_qty = total_qty
+                fee = Money(amount=total_fee, currency=fee_currency)
+
+        return OrderResult(
+            success=True,
+            order_id=str(data["orderId"]),
+            fill_price=fill_price,
+            filled_quantity=filled_qty,
+            fee=fee,
+            timestamp=datetime.utcnow(),
+        )
 
     async def cancel_order(self, order_id: str, symbol: Symbol) -> bool:
         """Cancel order on Binance."""
-        # Stub implementation
-        return True
+        venue_symbol = self.instrument_mapper.to_venue_symbol(symbol, "binance")
+        params = {
+            "symbol": venue_symbol.value.upper(),
+            "orderId": order_id,
+        }
+        data = await self._signed_request("DELETE", "/api/v3/order", params)
+        return data.get("status") in ("CANCELED", "PENDING_CANCEL")
 
     async def get_balance(self, asset: str | None = None) -> Balance | list[Balance]:
-        """Get Binance account balance."""
-        # Stub implementation
+        """Get account balances from Binance."""
+        data = await self._signed_request("GET", "/api/v3/account")
+
+        balances = []
+        for b in data.get("balances", []):
+            free = float(b["free"])
+            locked = float(b["locked"])
+            if free > 0 or locked > 0:
+                balances.append(
+                    Balance(
+                        asset=b["asset"],
+                        free=free,
+                        locked=locked,
+                        total=free + locked,
+                    )
+                )
+
         if asset:
-            return Balance(asset=asset, free=1.0, locked=0.0, total=1.0)
-        return [
-            Balance(asset="BTC", free=1.0, locked=0.0, total=1.0),
-            Balance(asset="USDT", free=50000.0, locked=0.0, total=50000.0),
-        ]
+            for b in balances:
+                if b.asset.upper() == asset.upper():
+                    return b
+            return Balance(asset=asset, free=0.0, locked=0.0, total=0.0)
+
+        return balances
 
     async def get_price(self, symbol: Symbol) -> Money:
-        """Get current price from Binance."""
-        try:
-            # response = await self.client.get(endpoint, params={"symbol": symbol.value.upper()})
-            # data = response.json()
-            # return Money(amount=float(data["price"]), currency="USD")
-
-            # Stub for Phase 1
-            return Money(amount=50000.0, currency="USD")
-        except Exception:
-            return Money(amount=0.0, currency="USD")
+        """Get current price from Binance public API."""
+        venue_symbol = self.instrument_mapper.to_venue_symbol(symbol, "binance")
+        data = await self._public_request(
+            "/api/v3/ticker/price",
+            {"symbol": venue_symbol.value.upper()},
+        )
+        return Money(
+            amount=float(data["price"]),
+            currency="USDT",
+        )
 
     async def get_recent_trades(
         self,
         symbol: Symbol,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Get recent trades from Binance."""
-        # Stub implementation
-        return []
+        """Get recent public trades."""
+        venue_symbol = self.instrument_mapper.to_venue_symbol(symbol, "binance")
+        return await self._public_request(
+            "/api/v3/trades",
+            {"symbol": venue_symbol.value.upper(), "limit": limit},
+        )
+
+    async def get_fee_tier(self) -> dict[str, Any]:
+        """Get trading fee tier from Binance."""
+        data = await self._signed_request("GET", "/api/v3/account")
+        return {
+            "maker_commission": data.get("makerCommission", 10) / 10000.0,
+            "taker_commission": data.get("takerCommission", 10) / 10000.0,
+        }
+
+    async def get_exchange_info(self) -> dict[str, Any]:
+        """Get exchange info with symbol filters."""
+        if self._exchange_info is None:
+            self._exchange_info = await self._public_request("/api/v3/exchangeInfo")
+        return self._exchange_info
+
+    async def get_klines(
+        self,
+        symbol: Symbol,
+        interval: str = "1m",
+        limit: int = 100,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get OHLCV klines from Binance.
+
+        Returns list of candles with normalized field names.
+        Binance format: [open_time, open, high, low, close, volume, close_time, ...]
+        """
+        venue_symbol = self.instrument_mapper.to_venue_symbol(symbol, "binance")
+        params: dict[str, Any] = {
+            "symbol": venue_symbol.value.upper(),
+            "interval": interval,
+            "limit": min(limit, 1000),
+        }
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+
+        data = await self._public_request("/api/v3/klines", params)
+
+        # Normalize to consistent format
+        candles = []
+        for k in data:
+            candles.append(
+                {
+                    "timestamp": k[0],  # Open time
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5]),
+                    "close_time": k[6],
+                }
+            )
+        return candles
 
     async def close(self) -> None:
-        """Close HTTP client."""
         await self.client.aclose()
 
 
 class DryRunAdapter(IExchangeAdapter):
     """Dry-run (paper trading) adapter.
 
-    Simulates exchange behavior for testing without real capital.
-    Uses NEAT trading environment logic for simulation.
+    Simulates exchange behavior with:
+    - Configurable slippage (basis points)
+    - Simulated latency (ms)
+    - Random order rejections (0.5%)
+    - Random partial fills (2%)
+    - Balance tracking across simulated trades
     """
 
     def __init__(
@@ -225,32 +425,50 @@ class DryRunAdapter(IExchangeAdapter):
         initial_balance: dict[str, float] | None = None,
         slippage_bps: float = 5.0,
         fee_rate: float = 0.001,
+        latency_ms: float = 1500.0,
+        rejection_rate: float = 0.005,
+        partial_fill_rate: float = 0.02,
     ):
-        """Initialize dry-run adapter.
-
-        Args:
-            initial_balance: Starting balances by asset
-            slippage_bps: Slippage in basis points
-            fee_rate: Transaction fee rate
-        """
         self.balances = initial_balance or {"USDT": 10000.0, "BTC": 0.0}
         self.slippage_bps = slippage_bps
         self.fee_rate = fee_rate
+        self.latency_ms = latency_ms
+        self.rejection_rate = rejection_rate
+        self.partial_fill_rate = partial_fill_rate
         self.orders: dict[str, dict[str, Any]] = {}
         self.order_counter = 0
-        self.current_prices: dict[str, float] = {
-            "BTCUSDT": 50000.0,
-            "ETHUSDT": 3000.0,
-        }
+        self.current_prices: dict[str, float] = {}
+        self._price_source: IExchangeAdapter | None = None  # Optional real price feed
 
-    def _get_asset_from_symbol(self, symbol: Symbol) -> tuple[str, str]:
-        """Extract base and quote assets from symbol."""
-        # Simplified for common pairs
+    def set_price_source(self, source: IExchangeAdapter) -> None:
+        """Use real adapter for price feed while simulating execution."""
+        self._price_source = source
+
+    async def _get_price(self, symbol: Symbol) -> float:
+        """Get current price from cache or source."""
         sym = symbol.value.upper()
+        if sym in self.current_prices:
+            return self.current_prices[sym]
+        if self._price_source:
+            price = await self._price_source.get_price(symbol)
+            return price.amount
+        return 50000.0  # Fallback
+
+    def _get_assets(self, symbol: Symbol) -> tuple[str, str]:
+        """Extract base and quote from symbol."""
+        sym = symbol.value.upper()
+        # Handle venue format (BTCUSDT, BTCUSD)
         if sym.endswith("USDT"):
-            return (sym.replace("USDT", ""), "USDT")
-        if sym.endswith("USD"):
-            return (sym.replace("USD", ""), "USD")
+            return (sym[:-4], "USDT")
+        if sym.endswith("USD") and not sym.endswith("_USD"):
+            return (sym[:-3], "USD")
+        # Handle canonical format (BTC_USD maps to BTC/USDT for dry-run)
+        if "_" in sym:
+            parts = sym.split("_")
+            base = parts[0]
+            # Map USD quote to USDT for dry-run simulation
+            quote = "USDT" if parts[1] == "USD" else parts[1]
+            return (base, quote)
         return (sym, "USDT")
 
     def _apply_slippage(self, price: float, side: Side) -> float:
@@ -268,20 +486,29 @@ class DryRunAdapter(IExchangeAdapter):
         order_type: str = "market",
         price: Money | None = None,
     ) -> OrderResult:
-        """Simulate order placement."""
-        base_asset, quote_asset = self._get_asset_from_symbol(symbol)
+        """Simulate order placement with slippage, latency, and random failures."""
+        # Simulate latency
+        if self.latency_ms > 0:
+            await asyncio.sleep(self.latency_ms / 1000.0)
 
-        # Get current price
-        current_price = self.current_prices.get(
-            symbol.value.upper(),
-            50000.0,
-        )
+        # Random rejection
+        if random.random() < self.rejection_rate:
+            return OrderResult(
+                success=False,
+                error="Simulated order rejection: insufficient liquidity",
+            )
 
-        # Apply slippage
+        base_asset, quote_asset = self._get_assets(symbol)
+        current_price = await self._get_price(symbol)
         fill_price = self._apply_slippage(current_price, side)
 
-        # Calculate notional and fee
-        notional = quantity * fill_price
+        # Random partial fill
+        fill_ratio = 1.0
+        if random.random() < self.partial_fill_rate:
+            fill_ratio = random.uniform(0.5, 0.99)
+
+        filled_qty = quantity * fill_ratio
+        notional = filled_qty * fill_price
         fee = notional * self.fee_rate
 
         # Check balance
@@ -292,18 +519,16 @@ class DryRunAdapter(IExchangeAdapter):
                     success=False,
                     error=f"Insufficient {quote_asset} balance",
                 )
-            # Update balances
             self.balances[quote_asset] = self.balances.get(quote_asset, 0) - required
-            self.balances[base_asset] = self.balances.get(base_asset, 0) + quantity
+            self.balances[base_asset] = self.balances.get(base_asset, 0) + filled_qty
         else:  # SELL
-            if self.balances.get(base_asset, 0) < quantity:
+            if self.balances.get(base_asset, 0) < filled_qty:
                 return OrderResult(
                     success=False,
                     error=f"Insufficient {base_asset} balance",
                 )
-            # Update balances
             received = notional - fee
-            self.balances[base_asset] = self.balances.get(base_asset, 0) - quantity
+            self.balances[base_asset] = self.balances.get(base_asset, 0) - filled_qty
             self.balances[quote_asset] = self.balances.get(quote_asset, 0) + received
 
         self.order_counter += 1
@@ -313,29 +538,25 @@ class DryRunAdapter(IExchangeAdapter):
             success=True,
             order_id=order_id,
             fill_price=Money(amount=fill_price, currency=quote_asset),
-            filled_quantity=quantity,
+            filled_quantity=filled_qty,
             fee=Money(amount=fee, currency=quote_asset),
             timestamp=datetime.utcnow(),
         )
 
     async def cancel_order(self, order_id: str, symbol: Symbol) -> bool:
-        """Cancel simulated order."""
         if order_id in self.orders:
             self.orders[order_id]["status"] = "CANCELLED"
             return True
         return False
 
     async def get_balance(self, asset: str | None = None) -> Balance | list[Balance]:
-        """Get simulated balance."""
         if asset:
             amount = self.balances.get(asset, 0.0)
             return Balance(asset=asset, free=amount, locked=0.0, total=amount)
-
         return [Balance(asset=k, free=v, locked=0.0, total=v) for k, v in self.balances.items()]
 
     async def get_price(self, symbol: Symbol) -> Money:
-        """Get simulated current price."""
-        price = self.current_prices.get(symbol.value.upper(), 50000.0)
+        price = await self._get_price(symbol)
         return Money(amount=price, currency="USDT")
 
     async def get_recent_trades(
@@ -343,112 +564,157 @@ class DryRunAdapter(IExchangeAdapter):
         symbol: Symbol,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Get simulated recent trades."""
+        return []
+
+    async def get_fee_tier(self) -> dict[str, Any]:
+        return {"maker_rate": self.fee_rate, "taker_rate": self.fee_rate}
+
+    async def get_exchange_info(self) -> dict[str, Any]:
+        return {}
+
+    async def get_klines(
+        self,
+        symbol: Symbol,
+        interval: str = "1m",
+        limit: int = 100,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Dry-run returns empty list - use real adapter for backfill."""
         return []
 
     def set_price(self, symbol: Symbol, price: float) -> None:
-        """Set simulated price (for testing)."""
         self.current_prices[symbol.value.upper()] = price
 
+    async def close(self) -> None:
+        pass
 
-class DiscordNotifier:
-    """Discord webhook notifier for alerts and reports.
 
-    Used for sending notifications on risk events and trade execution.
+class BitsoAdapter(IExchangeAdapter):
+    """Bitso adapter skeleton for future MXN integration.
+
+    Not fully implemented in Phase 4; exists to validate the adapter pattern.
     """
 
-    def __init__(self, webhook_url: str):
-        """Initialize Discord notifier.
-
-        Args:
-            webhook_url: Discord webhook URL
-        """
-        self.webhook_url = webhook_url
-        self.client = httpx.AsyncClient(timeout=10.0)
-
-    async def send_message(
+    def __init__(
         self,
-        content: str,
-        embeds: list[dict[str, Any]] | None = None,
-    ) -> bool:
-        """Send message to Discord webhook.
+        api_key: str,
+        api_secret: str,
+        base_url: str = "https://api.bitso.com",
+    ):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.base_url = base_url.rstrip("/")
+        self.client = httpx.AsyncClient(timeout=30.0)
+        self.instrument_mapper = InstrumentMapper()
 
-        Args:
-            content: Message content
-            embeds: Optional rich embeds
-
-        Returns:
-            True if sent successfully
-        """
-        if not self.webhook_url:
-            return False
-
-        payload: dict[str, Any] = {"content": content}
-        if embeds:
-            payload["embeds"] = embeds
-
-        try:
-            # response = await self.client.post(self.webhook_url, json=payload)
-            # return response.status_code == 204
-            return True  # Stub for Phase 1
-        except Exception:
-            return False
-
-    async def send_risk_alert(
-        self,
-        event_type: str,
-        severity: str,
-        message: str,
-        details: dict[str, Any] | None = None,
-    ) -> bool:
-        """Send risk alert to Discord."""
-        color = 0xFF0000 if severity == "critical" else 0xFFA500
-
-        embed = {
-            "title": f"Risk Alert: {event_type}",
-            "description": message,
-            "color": color,
-            "fields": [
-                {"name": k, "value": str(v), "inline": True} for k, v in (details or {}).items()
-            ],
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-        return await self.send_message(
-            f"@here Risk Alert ({severity.upper()})",
-            embeds=[embed],
-        )
-
-    async def send_trade_notification(
+    async def place_order(
         self,
         symbol: Symbol,
         side: Side,
         quantity: float,
-        price: Money,
-        pnl: Money | None = None,
-    ) -> bool:
-        """Send trade execution notification."""
-        color = 0x00FF00 if side == Side.BUY else 0xFF0000
+        order_type: str = "market",
+        price: Money | None = None,
+    ) -> OrderResult:
+        raise NotImplementedError("Bitso adapter: Phase 5+")
 
-        embed = {
-            "title": f"Trade Executed: {symbol.value}",
-            "color": color,
-            "fields": [
-                {"name": "Side", "value": side.value.upper(), "inline": True},
-                {"name": "Quantity", "value": str(quantity), "inline": True},
-                {"name": "Price", "value": str(price), "inline": True},
-            ],
-            "timestamp": datetime.utcnow().isoformat(),
-        }
+    async def cancel_order(self, order_id: str, symbol: Symbol) -> bool:
+        raise NotImplementedError("Bitso adapter: Phase 5+")
 
-        if pnl:
-            embed["fields"].append({"name": "P&L", "value": str(pnl), "inline": True})
+    async def get_balance(self, asset: str | None = None) -> Balance | list[Balance]:
+        raise NotImplementedError("Bitso adapter: Phase 5+")
 
-        return await self.send_message(
-            f"Trade: {side.value.upper()} {symbol.value}",
-            embeds=[embed],
-        )
+    async def get_price(self, symbol: Symbol) -> Money:
+        raise NotImplementedError("Bitso adapter: Phase 5+")
+
+    async def get_recent_trades(
+        self,
+        symbol: Symbol,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return []
+
+    async def get_fee_tier(self) -> dict[str, Any]:
+        return {"maker_rate": 0.0035, "taker_rate": 0.0035}
+
+    async def get_exchange_info(self) -> dict[str, Any]:
+        return {}
+
+    async def get_klines(
+        self,
+        symbol: Symbol,
+        interval: str = "1m",
+        limit: int = 100,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Bitso klines not implemented - Phase 5+."""
+        raise NotImplementedError("Bitso klines: Phase 5+")
 
     async def close(self) -> None:
-        """Close HTTP client."""
         await self.client.aclose()
+
+
+class ExchangeAdapterFactory:
+    """Factory for creating the configured exchange adapter."""
+
+    @staticmethod
+    def create_adapter(
+        venue: str | None = None,
+        mode: str | None = None,
+    ) -> IExchangeAdapter:
+        """Create adapter based on configuration.
+
+        Args:
+            venue: Override venue (binance, bitso). Defaults to settings.
+            mode: Override mode (backtest, dry_run, live). Defaults to settings.
+
+        Returns:
+            Configured IExchangeAdapter instance.
+        """
+        from stonks_trading.shared.config import settings
+
+        effective_mode = (mode or settings.mode).lower()
+        effective_venue = (venue or effective_mode).lower()
+
+        # Validate venue first
+        valid_venues = ("binance", "bitso", "live", "dry_run", "backtest")
+        if effective_venue not in valid_venues:
+            raise ValueError(f"Unknown venue: {effective_venue}")
+
+        # Dry-run mode uses DryRunAdapter regardless of venue
+        if effective_mode == "dry_run":
+            adapter = DryRunAdapter(
+                initial_balance={"USDT": settings.initial_capital, "BTC": 0.0},
+                slippage_bps=5.0,
+                fee_rate=settings.transaction_fee,
+            )
+            # Wire real price feed if available
+            if settings.binance_api_key:
+                price_adapter = BinanceAdapter(
+                    api_key=settings.binance_api_key,
+                    api_secret=settings.binance_api_secret,
+                    base_url=settings.binance_base_url,
+                )
+                adapter.set_price_source(price_adapter)
+            return adapter
+
+        # Live trading requires API keys
+        if effective_venue in ("binance", "live"):
+            if not settings.binance_api_key or not settings.binance_api_secret:
+                raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET required for live mode")
+            return BinanceAdapter(
+                api_key=settings.binance_api_key,
+                api_secret=settings.binance_api_secret,
+                base_url=settings.binance_base_url,
+            )
+
+        if effective_venue == "bitso":
+            if not settings.bitso_api_key or not settings.bitso_api_secret:
+                raise ValueError("BITSO_API_KEY and BITSO_API_SECRET required")
+            return BitsoAdapter(
+                api_key=settings.bitso_api_key,
+                api_secret=settings.bitso_api_secret,
+            )
+
+        raise ValueError(f"Unknown venue: {effective_venue}")

@@ -4,6 +4,10 @@ Services contain pure business logic with no I/O.
 They operate on entities and value objects.
 """
 
+from __future__ import annotations
+
+from datetime import datetime
+
 from stonks_trading.domains.trading.entities import Position, RiskCheckResult
 from stonks_trading.domains.trading.enums import RiskLevel, Side
 from stonks_trading.domains.trading.value_objects import (
@@ -14,10 +18,10 @@ from stonks_trading.domains.trading.value_objects import (
 
 
 class RiskChecker:
-    """Risk management service.
+    """Risk management service with safe mode and kill switch.
 
-    Validates trades against risk limits before execution.
-    Pure logic - no I/O or external dependencies.
+    Pure logic — no I/O. State (safe_mode, last_trade_time) is maintained
+    by the caller (bot) and passed in on each check.
     """
 
     def __init__(
@@ -26,19 +30,17 @@ class RiskChecker:
         max_drawdown_pct: float = 0.15,
         max_trades_per_day: int = 40,
         min_trade_interval_minutes: int = 15,
+        max_daily_loss_pct: float = 0.03,
+        cooldown_after_loss_minutes: int = 60,
+        notification_threshold: float = 0.8,
     ):
-        """Initialize risk checker with limits.
-
-        Args:
-            max_position_pct: Max portfolio allocation to single position
-            max_drawdown_pct: Kill switch drawdown threshold
-            max_trades_per_day: Maximum trades allowed per day
-            min_trade_interval_minutes: Minimum minutes between trades
-        """
         self.max_position_pct = max_position_pct
         self.max_drawdown_pct = max_drawdown_pct
         self.max_trades_per_day = max_trades_per_day
         self.min_trade_interval_minutes = min_trade_interval_minutes
+        self.max_daily_loss_pct = max_daily_loss_pct
+        self.cooldown_after_loss_minutes = cooldown_after_loss_minutes
+        self.notification_threshold = notification_threshold
 
     def check_trade(
         self,
@@ -49,49 +51,65 @@ class RiskChecker:
         daily_trade_count: int,
         minutes_since_last_trade: int,
         current_drawdown: float = 0.0,
+        daily_loss_pct: float = 0.0,
+        in_safe_mode: bool = False,
+        last_realized_loss_time: datetime | None = None,
     ) -> RiskCheckResult:
-        """Check if trade is allowed under risk limits.
+        """Full risk check with safe mode and cooldown."""
 
-        Args:
-            side: Buy or sell
-            notional: Trade size in base currency
-            portfolio_value: Total portfolio value
-            current_position: Current position if any
-            daily_trade_count: Number of trades today
-            minutes_since_last_trade: Minutes since last trade
-            current_drawdown: Current drawdown percentage
-
-        Returns:
-            RiskCheckResult with allowed flag and reason
-        """
-        # Check kill switch - max drawdown
+        # Kill switch — max drawdown
         if current_drawdown > self.max_drawdown_pct:
             return RiskCheckResult(
                 allowed=False,
-                reason=f"Kill switch: drawdown {current_drawdown:.2%} exceeds limit",
+                reason=f"KILL SWITCH: drawdown {current_drawdown:.2%} exceeds {self.max_drawdown_pct:.2%}",
                 risk_level=RiskLevel.CRITICAL,
             )
 
-        # Check daily trade limit (churning prevention)
+        # Kill switch — max daily loss
+        if daily_loss_pct > self.max_daily_loss_pct:
+            return RiskCheckResult(
+                allowed=False,
+                reason=f"KILL SWITCH: daily loss {daily_loss_pct:.2%} exceeds {self.max_daily_loss_pct:.2%}",
+                risk_level=RiskLevel.CRITICAL,
+            )
+
+        # Safe mode — only sells allowed
+        if in_safe_mode and side == Side.BUY:
+            return RiskCheckResult(
+                allowed=False,
+                reason="Safe mode active: buys are blocked",
+                risk_level=RiskLevel.CRITICAL,
+            )
+
+        # Daily trade limit
         if daily_trade_count >= self.max_trades_per_day:
             return RiskCheckResult(
                 allowed=False,
-                reason=f"Daily trade limit reached ({daily_trade_count} trades)",
+                reason=f"Daily trade limit reached ({daily_trade_count})",
                 risk_level=RiskLevel.WARNING,
             )
 
-        # Check minimum trade interval
+        # Minimum trade interval
         if minutes_since_last_trade < self.min_trade_interval_minutes:
             return RiskCheckResult(
                 allowed=False,
-                reason=f"Trade interval too short ({minutes_since_last_trade} min)",
+                reason=f"Trade interval too short ({minutes_since_last_trade} min < {self.min_trade_interval_minutes})",
                 risk_level=RiskLevel.WARNING,
             )
 
-        # Check position size for buys
+        # Cooldown after realized loss
+        if last_realized_loss_time and side == Side.BUY:
+            minutes_since = (datetime.utcnow() - last_realized_loss_time).total_seconds() / 60
+            if minutes_since < self.cooldown_after_loss_minutes:
+                return RiskCheckResult(
+                    allowed=False,
+                    reason=f"Cooldown after loss: {minutes_since:.0f} min / {self.cooldown_after_loss_minutes} min",
+                    risk_level=RiskLevel.WARNING,
+                )
+
+        # Position size for buys
         if side == Side.BUY:
             if current_position and current_position.is_open():
-                # Check if adding to existing position
                 position_value = current_position.calculate_market_value(
                     Money(amount=notional.amount, currency=notional.currency)
                 )
@@ -113,10 +131,7 @@ class RiskChecker:
         current_equity: Money,
         peak_equity: Money,
     ) -> RiskCheckResult:
-        """Check if drawdown exceeds limits.
-
-        Returns critical risk level if kill switch should trigger.
-        """
+        """Check drawdown with warning and critical thresholds."""
         if peak_equity.amount <= 0:
             return RiskCheckResult(allowed=True)
 
@@ -129,14 +144,22 @@ class RiskChecker:
                 risk_level=RiskLevel.CRITICAL,
             )
 
-        if drawdown > self.max_drawdown_pct * 0.8:
+        if drawdown > self.max_drawdown_pct * self.notification_threshold:
             return RiskCheckResult(
                 allowed=True,
-                reason=f"Warning: drawdown at {drawdown:.2%}",
+                reason=f"Warning: drawdown at {drawdown:.2%} (threshold {self.max_drawdown_pct * self.notification_threshold:.2%})",
                 risk_level=RiskLevel.WARNING,
             )
 
         return RiskCheckResult(allowed=True)
+
+    def should_notify(
+        self,
+        current_value: float,
+        threshold: float,
+    ) -> bool:
+        """Check if current value is within notification window (80% of threshold)."""
+        return current_value >= threshold * self.notification_threshold
 
 
 class InstrumentMapper:
@@ -233,7 +256,10 @@ class InstrumentMapper:
 
 
 class FeeCalculator:
-    """Calculate fees for trades based on tier and venue."""
+    """Fee calculator with live tier fetching.
+
+    Caches fee tier after first fetch. Use `refresh_tier()` to update.
+    """
 
     # Default fee tiers (approximate, should be synced from exchange API)
     DEFAULT_TIERS: dict[str, FeeTier] = {
@@ -247,30 +273,27 @@ class FeeCalculator:
         tier_name: str = "binance_default",
         custom_tiers: dict[str, FeeTier] | None = None,
     ):
-        """Initialize fee calculator.
-
-        Args:
-            tier_name: Fee tier to use
-            custom_tiers: Optional custom fee tiers
-        """
+        self._tier_name = tier_name
         tiers = {**self.DEFAULT_TIERS, **(custom_tiers or {})}
         self.tier = tiers.get(tier_name, self.DEFAULT_TIERS["binance_default"])
+        self._live_tier: FeeTier | None = None
+
+    async def refresh_tier(self, adapter: "IExchangeAdapter") -> FeeTier:
+        """Fetch live fee tier from exchange and cache it."""
+        fee_data = await adapter.get_fee_tier()
+        maker = fee_data.get("maker_rate", fee_data.get("maker_commission", self.tier.maker_rate))
+        taker = fee_data.get("taker_rate", fee_data.get("taker_commission", self.tier.taker_rate))
+        self._live_tier = FeeTier(maker_rate=maker, taker_rate=taker, tier_name="live")
+        return self._live_tier
 
     def calculate_fee(
         self,
         notional: Money,
         is_maker: bool = False,
     ) -> Money:
-        """Calculate fee for a trade.
-
-        Args:
-            notional: Trade notional value
-            is_maker: Whether order is maker (limit) or taker (market)
-
-        Returns:
-            Fee amount
-        """
-        return self.tier.calculate_fee(notional, is_maker)
+        """Calculate fee using live tier if available, else fallback."""
+        tier = self._live_tier or self.tier
+        return tier.calculate_fee(notional, is_maker)
 
     def calculate_neat_equivalent(
         self,

@@ -15,7 +15,6 @@ from stonks_trading.domains.trading.entities import (
     DataGap,
     GenerationMetric,
     Genome,
-    MarketData,
     Order,
     Position,
     RiskEvent,
@@ -35,8 +34,8 @@ from stonks_trading.shared.postgres_models import (
     RiskEventModel,
     SystemConfigModel,
     TradeModel,
-    TrainingRunModel,
     TradeSide,
+    TrainingRunModel,
 )
 
 # =============================================================================
@@ -49,19 +48,23 @@ async def save_trade(trade: Trade) -> Trade:
     model = await TradeModel.create(
         symbol=trade.symbol.value,
         side=TradeSide(trade.side.value),
-        fill_price=float(trade.fill_price),
+        fill_price=trade.fill_price.amount,
         quantity=trade.quantity,
-        fee=float(trade.fee),
-        fee_currency=trade.fee_currency,
-        realized_pnl=float(trade.realized_pnl.amount) if trade.realized_pnl else None,
+        fee=trade.fee.amount,
+        fee_currency=trade.fee.currency,
+        realized_pnl=trade.realized_pnl.amount if trade.realized_pnl else None,
         order_id=trade.order_id,
-        intended_price=float(trade.intended_price.amount) if trade.intended_price else None,
+        intended_price=trade.intended_price.amount if trade.intended_price else None,
         slippage_bps=trade.slippage_bps,
         quote_quantity=trade.quote_quantity,
         fee_rate=trade.fee_rate,
-        mode=TradingMode(trade.mode.value) if isinstance(trade.mode, TradingMode) else TradingMode(trade.mode),
+        mode=TradingMode(trade.mode.value)
+        if isinstance(trade.mode, TradingMode)
+        else TradingMode(trade.mode)
+        if trade.mode
+        else TradingMode.BACKTEST,
         genome_id=trade.genome_id,
-        entry_price=float(trade.entry_price.amount) if trade.entry_price else None,
+        entry_price=trade.entry_price.amount if trade.entry_price else None,
         latency_ms=trade.latency_ms,
         exchange=trade.exchange,
         strategy=trade.strategy,
@@ -110,20 +113,35 @@ def _model_to_trade(model: TradeModel) -> Trade:
         quantity=model.quantity,
         fee=Money(amount=model.fee, currency=model.fee_currency),
         fee_currency=model.fee_currency,
-        realized_pnl=Money(amount=model.realized_pnl, currency=model.fee_currency) if model.realized_pnl else None,
+        realized_pnl=Money(amount=model.realized_pnl, currency=model.fee_currency)
+        if model.realized_pnl
+        else None,
         order_id=model.order_id,
-        intended_price=Money(amount=model.intended_price, currency=model.fee_currency) if model.intended_price else None,
+        intended_price=Money(amount=model.intended_price, currency=model.fee_currency)
+        if model.intended_price
+        else None,
         slippage_bps=model.slippage_bps,
         quote_quantity=model.quote_quantity,
         fee_rate=model.fee_rate,
         mode=model.mode,
         genome_id=model.genome_id,
-        entry_price=Money(amount=model.entry_price, currency=model.fee_currency) if model.entry_price else None,
+        entry_price=Money(amount=model.entry_price, currency=model.fee_currency)
+        if model.entry_price
+        else None,
         latency_ms=model.latency_ms,
         exchange=model.exchange,
         strategy=model.strategy,
         created_at=model.created_at,
     )
+
+
+async def count_trades_today() -> int:
+    """Count trades executed today (since midnight UTC)."""
+    now = datetime.utcnow()
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    count = await TradeModel.filter(created_at__gte=start_of_day).count()
+    return count
 
 
 # =============================================================================
@@ -145,7 +163,9 @@ async def save_position(position: Position) -> Position:
     if existing:
         existing.quantity = position.quantity
         existing.entry_price = float(position.entry_price.amount) if position.entry_price else None
-        existing.current_price = float(position.current_price.amount) if position.current_price else None
+        existing.current_price = (
+            float(position.current_price.amount) if position.current_price else None
+        )
         existing.unrealized_pnl = position.unrealized_pnl
         await existing.save()
         position.id = existing.id
@@ -178,7 +198,9 @@ def _model_to_position(model: PositionModel) -> Position:
         symbol=Symbol(value=model.symbol),
         quantity=model.quantity,
         entry_price=Money(amount=model.entry_price, currency="USD") if model.entry_price else None,
-        current_price=Money(amount=model.current_price, currency="USD") if model.current_price else None,
+        current_price=Money(amount=model.current_price, currency="USD")
+        if model.current_price
+        else None,
         unrealized_pnl=model.unrealized_pnl,
         created_at=datetime.utcnow(),  # PositionModel tracks updated_at only
         updated_at=model.updated_at,
@@ -306,7 +328,9 @@ async def save_risk_event(event: RiskEvent) -> RiskEvent:
         value=event.value,
         threshold=event.threshold,
         notified=event.notified,
-        mode=TradingMode(event.mode.value) if isinstance(event.mode, TradingMode) else TradingMode.DRY_RUN,
+        mode=TradingMode(event.mode.value)
+        if isinstance(event.mode, TradingMode)
+        else TradingMode.DRY_RUN,
         metric_name=event.metric_name,
         metric_value=event.metric_value,
         portfolio_value=float(event.portfolio_value.amount) if event.portfolio_value else None,
@@ -364,8 +388,12 @@ def _model_to_risk_event(model: RiskEventModel) -> RiskEvent:
         mode=model.mode,
         metric_name=model.metric_name,
         metric_value=model.metric_value,
-        portfolio_value=Money(amount=model.portfolio_value, currency="USD") if model.portfolio_value else None,
-        position_value=Money(amount=model.position_value, currency="USD") if model.position_value else None,
+        portfolio_value=Money(amount=model.portfolio_value, currency="USD")
+        if model.portfolio_value
+        else None,
+        position_value=Money(amount=model.position_value, currency="USD")
+        if model.position_value
+        else None,
         created_at=model.created_at,
         acknowledged_at=model.acknowledged_at,
         acknowledged_by=model.acknowledged_by,
@@ -390,7 +418,9 @@ async def save_order(order: Order) -> Order:
         venue_order_id=order.venue_order_id,
         filled_qty=order.filled_quantity,
         avg_fill_price=float(order.avg_fill_price.amount) if order.avg_fill_price else None,
-        mode=TradingMode(order.mode.value) if isinstance(order.mode, TradingMode) else TradingMode(order.mode),
+        mode=TradingMode(order.mode.value)
+        if isinstance(order.mode, TradingMode)
+        else TradingMode(order.mode),
         genome_id=order.genome_id,
         price=float(order.price.amount) if order.price else None,
     )
@@ -447,7 +477,9 @@ def _model_to_order(model: OrderModel) -> Order:
         client_order_id=model.client_order_id,
         venue_order_id=model.venue_order_id,
         filled_quantity=model.filled_qty,
-        avg_fill_price=Money(amount=model.avg_fill_price, currency="USDT") if model.avg_fill_price else None,
+        avg_fill_price=Money(amount=model.avg_fill_price, currency="USDT")
+        if model.avg_fill_price
+        else None,
         mode=model.mode,
         genome_id=model.genome_id,
         price=Money(amount=model.price, currency="USDT") if model.price else None,
@@ -471,7 +503,9 @@ async def save_bot_decision(decision: BotDecision) -> BotDecision:
         sell_prob=decision.sell_prob,
         action=decision.action,
         reason=decision.reason,
-        mode=TradingMode(decision.mode.value) if isinstance(decision.mode, TradingMode) else TradingMode(decision.mode),
+        mode=TradingMode(decision.mode.value)
+        if isinstance(decision.mode, TradingMode)
+        else TradingMode(decision.mode),
         candle_close_at=decision.candle_close_at,
         executed=decision.executed,
         trade_id=decision.trade_id,
@@ -485,7 +519,9 @@ async def list_decisions_by_symbol(
     limit: int = 100,
 ) -> list[BotDecision]:
     """List bot decisions for symbol."""
-    models = await BotDecisionModel.filter(symbol=symbol.value).limit(limit).order_by("-candle_close_at")
+    models = (
+        await BotDecisionModel.filter(symbol=symbol.value).limit(limit).order_by("-candle_close_at")
+    )
     return [_model_to_bot_decision(m) for m in models]
 
 

@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status
 
 from stonks_trading.domains.trading import repositories as repo
+from stonks_trading.domains.trading.adapters import ExchangeAdapterFactory
 from stonks_trading.domains.trading.dtos import (
     BalanceResponse,
     GenomeActivateRequest,
@@ -17,6 +18,7 @@ from stonks_trading.domains.trading.dtos import (
     GenomeListResponse,
     GenomeResponse,
     MarketDataListResponse,
+    MarketDataResponse,
     NeatSignalRequest,
     NeatSignalResponse,
     PortfolioResponse,
@@ -30,9 +32,21 @@ from stonks_trading.domains.trading.dtos import (
     TradeListResponse,
     TradeResponse,
 )
-from stonks_trading.domains.trading.entities import Genome, Position, RiskEvent, Trade
-from stonks_trading.domains.trading.enums import Side
-from stonks_trading.domains.trading.mappers import GenomeMapper, PositionMapper, RiskEventMapper, TradeMapper
+from stonks_trading.domains.trading.entities import Genome, Position
+from stonks_trading.domains.trading.mappers import (
+    BalanceMapper,
+    GenomeMapper,
+    PositionMapper,
+    RiskEventMapper,
+    TradeMapper,
+)
+from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
+from stonks_trading.domains.trading.use_cases import (
+    FetchBalancesUseCase,
+    GetCandlesUseCase,
+    GetMarketDataUseCase,
+    PlaceOrderUseCase,
+)
 from stonks_trading.domains.trading.value_objects import Money, Symbol
 from stonks_trading.shared.postgres_models import PositionModel
 
@@ -57,14 +71,52 @@ signal_router = APIRouter(prefix="/signals", tags=["signals"])
     status_code=status.HTTP_201_CREATED,
 )
 async def create_trade(request: TradeCreateRequest) -> TradeResponse:
-    """Execute a new trade.
+    """Execute a new trade via exchange adapter.
 
-    Validates the trade request and executes through the trading use case.
+    Uses configured adapter (dry_run or live) to place order.
+    Orchestrates through PlaceOrderUseCase per CLEAN architecture.
     """
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Trade execution requires Phase 4 exchange adapters",
-    )
+    adapter = ExchangeAdapterFactory.create_adapter()
+
+    try:
+        # Create use case with injected adapter and services
+        use_case = PlaceOrderUseCase(
+            adapter=adapter,
+            risk_checker=RiskChecker(),
+            fee_calculator=FeeCalculator(),
+        )
+
+        # Get current position and daily trades
+        current_position = await repo.get_position_by_symbol(Symbol(value=request.symbol.upper()))
+        daily_trades = await repo.count_trades_today()
+
+        # Execute through use case (all business logic)
+        price = Money(amount=request.price, currency="USDT") if request.price else None
+        result = await use_case.execute(
+            symbol=Symbol(value=request.symbol.upper()),
+            side=request.side,
+            quantity=request.quantity,
+            price=price,
+            current_position=current_position,
+            daily_trade_count=daily_trades,
+            minutes_since_last_trade=999,
+        )
+
+        if not result.success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.error or "Trade execution failed",
+            )
+
+        if result.trade:
+            return TradeMapper.to_response(result.trade)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Trade executed but no trade returned",
+        )
+    finally:
+        await adapter.close()
 
 
 @trades_router.get(
@@ -141,7 +193,9 @@ async def list_all_positions() -> list[Position]:
             symbol=Symbol(value=m.symbol),
             quantity=m.quantity,
             entry_price=Money(amount=m.entry_price, currency="USD") if m.entry_price else None,
-            current_price=Money(amount=m.current_price, currency="USD") if m.current_price else None,
+            current_price=Money(amount=m.current_price, currency="USD")
+            if m.current_price
+            else None,
             unrealized_pnl=m.unrealized_pnl,
             created_at=datetime.utcnow(),  # PositionModel tracks updated_at only
             updated_at=m.updated_at,
@@ -309,12 +363,18 @@ async def get_risk_status() -> dict[str, Any]:
     response_model=PriceResponse,
 )
 async def get_price(symbol: str) -> PriceResponse:
-    """Get current price for symbol."""
-    # Placeholder - full implementation in Phase 4 with exchange adapters
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Market data requires Phase 4 exchange adapters",
-    )
+    """Get current price for symbol from exchange."""
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        use_case = GetMarketDataUseCase(adapter)
+        price = await use_case.execute(Symbol(value=symbol))
+        return PriceResponse(
+            symbol=symbol.upper(),
+            price=price.amount,
+            timestamp=datetime.utcnow(),
+        )
+    finally:
+        await adapter.close()
 
 
 @market_router.get(
@@ -326,12 +386,38 @@ async def get_candles(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> MarketDataListResponse:
-    """Get OHLCV candles for symbol."""
-    # Placeholder - full implementation in Phase 4 with data pipeline
-    return MarketDataListResponse(
-        symbol=symbol.upper(),
-        candles=[],
-    )
+    """Get OHLCV candles for symbol from exchange."""
+    adapter = ExchangeAdapterFactory.create_adapter()
+
+    try:
+        use_case = GetCandlesUseCase(adapter)
+        candles = await use_case.execute(
+            symbol=Symbol(value=symbol.upper()),
+            start=start,
+            end=end,
+            limit=100,
+        )
+
+        # Convert to response format
+        candle_responses = [
+            MarketDataResponse(
+                symbol=symbol.upper(),
+                timestamp=datetime.fromtimestamp(c["timestamp"] / 1000),
+                open=c["open"],
+                high=c["high"],
+                low=c["low"],
+                close=c["close"],
+                volume=c["volume"],
+            )
+            for c in candles
+        ]
+
+        return MarketDataListResponse(
+            symbol=symbol.upper(),
+            candles=candle_responses,
+        )
+    finally:
+        await adapter.close()
 
 
 # =============================================================================
@@ -344,14 +430,28 @@ async def get_candles(
     response_model=PortfolioResponse,
 )
 async def get_portfolio() -> PortfolioResponse:
-    """Get complete portfolio summary."""
-    # Placeholder - full implementation in Phase 4 with exchange adapters
-    return PortfolioResponse(
-        total_value=10000.0,
-        cash_value=10000.0,
-        positions_value=0.0,
-        positions=[],
-    )
+    """Get complete portfolio summary with real balances."""
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        use_case = FetchBalancesUseCase(adapter)
+        balances = await use_case.execute()
+
+        total_value = sum(b.total for b in balances)
+        cash_value = next((b.total for b in balances if b.asset == "USDT"), 0.0)
+        positions_value = total_value - cash_value
+
+        # Get positions from database
+        positions = await list_all_positions()
+        position_responses = PositionMapper.to_response_list(positions)
+
+        return PortfolioResponse(
+            total_value=total_value,
+            cash_value=cash_value,
+            positions_value=positions_value,
+            positions=position_responses,
+        )
+    finally:
+        await adapter.close()
 
 
 @portfolio_router.get(
@@ -359,11 +459,14 @@ async def get_portfolio() -> PortfolioResponse:
     response_model=BalanceResponse,
 )
 async def get_balance() -> BalanceResponse:
-    """Get account balances."""
-    # Placeholder - full implementation in Phase 4 with exchange adapters
-    return BalanceResponse(
-        balances=[],
-    )
+    """Get account balances from exchange."""
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        use_case = FetchBalancesUseCase(adapter)
+        balances = await use_case.execute()
+        return BalanceMapper.to_response(balances)
+    finally:
+        await adapter.close()
 
 
 # =============================================================================
