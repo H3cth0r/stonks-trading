@@ -46,7 +46,7 @@ class Money(BaseModel):
     """
 
     amount: float = Field(..., description="Monetary amount")
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str = Field(default="USD", min_length=3, max_length=10)  # Support USDT, USDC, etc.
 
     model_config = {"frozen": True}
 

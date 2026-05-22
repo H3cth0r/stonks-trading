@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from stonks_trading.domains.trading.enums import RiskLevel, Side
+from stonks_trading.domains.trading.enums import RiskLevel, Side, TradingMode
 from stonks_trading.domains.trading.value_objects import Money, Symbol
 
 
@@ -125,6 +125,18 @@ class Trade:
     created_at: datetime = field(default_factory=datetime.utcnow)
     order_id: str | None = None
     venue_trade_id: str | None = None
+    # Phase 3 expanded fields
+    intended_price: Money | None = None
+    slippage_bps: float = 0.0
+    quote_quantity: float = 0.0
+    fee_rate: float = 0.001
+    fee_currency: str = "USDT"
+    mode: TradingMode = TradingMode.DRY_RUN
+    genome_id: str | None = None
+    entry_price: Money | None = None
+    latency_ms: float = 0.0
+    exchange: str = "binance"
+    strategy: str = "NEAT_v1"
 
     def calculate_value(self) -> Money:
         """Calculate total value of trade (price * quantity)."""
@@ -159,6 +171,9 @@ class Position:
     id: int | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+    # Phase 3 expanded fields
+    current_price: Money | None = None
+    unrealized_pnl: float = 0.0
 
     def is_open(self) -> bool:
         """Check if position has non-zero quantity."""
@@ -248,6 +263,17 @@ class Genome:
     max_drawdown: float = 0.0
     total_return: float = 0.0
     notes: str | None = None
+    # Phase 3 expanded fields
+    model_family: str = "NEAT_RNN_V1"
+    artifact_uri: str | None = None
+    trainer_git_sha: str | None = None
+    feature_schema_id: str | None = None
+    roi_validation: float | None = None
+    roi_test: float | None = None
+    fee_rate_used: float = 0.001
+    trained_at: datetime | None = None
+    activated_at: datetime | None = None
+    deactivated_at: datetime | None = None
 
     def get_config_summary(self) -> dict[str, Any]:
         """Get training configuration summary for display."""
@@ -276,6 +302,11 @@ class RiskEvent:
     metric_name: str | None = None
     metric_value: float | None = None
     threshold_value: float | None = None
+    # Phase 3 fields
+    value: float = 0.0
+    threshold: float = 0.0
+    notified: bool = False
+    mode: TradingMode = TradingMode.DRY_RUN
     # Context
     portfolio_value: Money | None = None
     position_value: Money | None = None
@@ -290,6 +321,149 @@ class RiskEvent:
         self.acknowledged_at = datetime.utcnow()
         self.acknowledged_by = user
         self.action_taken = action
+
+
+@dataclass
+class Order:
+    """Order entity for venue order lifecycle tracking.
+
+    Represents a placed order through its lifecycle:
+    pending -> filled/cancelled/rejected.
+    """
+
+    symbol: Symbol
+    side: Side
+    quantity: float
+    price: Money | None = None
+    id: int | None = None
+    order_type: str = "market"  # market, limit
+    status: str = "pending"  # pending, filled, cancelled, rejected
+    client_order_id: str | None = None
+    venue_order_id: str | None = None
+    filled_quantity: float = 0.0
+    avg_fill_price: Money | None = None
+    mode: TradingMode = TradingMode.DRY_RUN
+    genome_id: str | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+    filled_at: datetime | None = None
+
+    def is_open(self) -> bool:
+        """Check if order is still pending."""
+        return self.status == "pending"
+
+    def is_filled(self) -> bool:
+        """Check if order is filled."""
+        return self.status == "filled"
+
+
+@dataclass
+class BotDecision:
+    """Bot decision record for observability.
+
+    One row per symbol per closed 1m candle —
+    logs NEAT output and the action taken.
+    """
+
+    symbol: Symbol
+    buy_prob: float
+    sell_prob: float
+    action: str | None = None  # buy, sell, hold
+    id: int | None = None
+    genome_id: str | None = None
+    reason: str | None = None
+    mode: TradingMode = TradingMode.DRY_RUN
+    candle_close_at: datetime = field(default_factory=datetime.utcnow)
+    executed: bool = False
+    trade_id: int | None = None
+
+
+@dataclass
+class TrainingRun:
+    """Training run entity for NEAT training sessions.
+
+    Tracks metadata for a complete training session.
+    """
+
+    symbol: Symbol | None = None
+    id: int | None = None
+    model_family: str = "NEAT_RNN_V1"
+    artifact_prefix_uri: str | None = None
+    trainer_git_sha: str | None = None
+    generations: int = 0
+    best_fitness: float = 0.0
+    best_roi_validation: float | None = None
+    best_roi_test: float | None = None
+    episode_steps: int = 20160
+    pop_size: int = 150
+    fee_rate: float = 0.001
+    started_at: datetime = field(default_factory=datetime.utcnow)
+    finished_at: datetime | None = None
+    status: str = "running"  # running, completed, failed
+    config_snapshot: dict[str, Any] | None = None
+
+
+@dataclass
+class GenerationMetric:
+    """Per-generation training metrics entity.
+
+    Captures fitness and diversity metrics at each
+    generation during a training run.
+    """
+
+    run_id: int
+    generation: int
+    best_fitness: float
+    mean_fitness: float = 0.0
+    id: int | None = None
+    # Extended metrics
+    worst_fitness: float = 0.0
+    num_species: int = 0
+    num_genomes: int = 0
+    best_roi_validation: float | None = None
+    stagnation_count: int | None = None
+    num_trades_best: int | None = None
+    max_drawdown_best: float | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class DataGap:
+    """Data availability gap entity.
+
+    Tracks detected gaps in market data ingestion.
+    """
+
+    symbol: Symbol
+    gap_start: datetime
+    id: int | None = None
+    gap_end: datetime | None = None
+    gap_type: str = "ws_disconnect"  # ws_disconnect, rest_gap, malformed
+    backfilled: bool = False
+    detected_at: datetime = field(default_factory=datetime.utcnow)
+    filled_at: datetime | None = None
+
+    def is_filled(self) -> bool:
+        """Check if gap has been backfilled."""
+        return self.backfilled and self.filled_at is not None
+
+
+@dataclass
+class SystemConfig:
+    """System configuration key-value store.
+
+    Used for runtime configuration management.
+    """
+
+    key: str
+    value: Any
+    id: int | None = None
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+
+    @classmethod
+    def from_kv(cls, key: str, value: Any) -> "SystemConfig":
+        """Create from key-value pair."""
+        return cls(key=key, value=value)
 
 
 @dataclass

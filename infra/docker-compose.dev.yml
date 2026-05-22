@@ -77,6 +77,33 @@ services:
     networks:
       - stonks-network
 
+  # API Service for Phase 3 testing
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: stonks-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://stonks:stonks@postgres:5432/stonks_trading
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../src:/app/src:ro  # Mount source for development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stonks-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # Data Pipeline Service (optional - for testing ingestion)
   # Uncomment to run data pipeline in container
   # data-pipeline:

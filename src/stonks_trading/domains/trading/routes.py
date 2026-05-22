@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from stonks_trading.domains.trading import repositories as repo
 from stonks_trading.domains.trading.dtos import (
     BalanceResponse,
     GenomeActivateRequest,
@@ -29,6 +30,11 @@ from stonks_trading.domains.trading.dtos import (
     TradeListResponse,
     TradeResponse,
 )
+from stonks_trading.domains.trading.entities import Genome, Position, RiskEvent, Trade
+from stonks_trading.domains.trading.enums import Side
+from stonks_trading.domains.trading.mappers import GenomeMapper, PositionMapper, RiskEventMapper, TradeMapper
+from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.shared.postgres_models import PositionModel
 
 # Create router
 trades_router = APIRouter(prefix="/trades", tags=["trades"])
@@ -55,11 +61,9 @@ async def create_trade(request: TradeCreateRequest) -> TradeResponse:
 
     Validates the trade request and executes through the trading use case.
     """
-    # In production, would call ExecuteTradeUseCase
-    # Stub for Phase 1
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Trade execution not yet implemented",
+        detail="Trade execution requires Phase 4 exchange adapters",
     )
 
 
@@ -73,8 +77,12 @@ async def list_trades(
     offset: int = Query(default=0, ge=0),
 ) -> TradeListResponse:
     """List trades with optional filtering."""
-    # Stub for Phase 1
-    return TradeListResponse(trades=[], total=0)
+    if symbol:
+        trades = await repo.list_trades_by_symbol(Symbol(value=symbol), limit=limit)
+    else:
+        trades = await repo.list_trades(limit=limit, offset=offset)
+    trade_responses = TradeMapper.to_response_list(trades)
+    return TradeListResponse(trades=trade_responses, total=len(trade_responses))
 
 
 @trades_router.get(
@@ -83,10 +91,13 @@ async def list_trades(
 )
 async def get_trade(trade_id: int) -> TradeResponse:
     """Get trade by ID."""
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Trade {trade_id} not found",
-    )
+    trade = await repo.get_trade_by_id(trade_id)
+    if not trade:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trade {trade_id} not found",
+        )
+    return TradeMapper.to_response(trade)
 
 
 # =============================================================================
@@ -100,8 +111,9 @@ async def get_trade(trade_id: int) -> TradeResponse:
 )
 async def list_positions() -> PositionListResponse:
     """List all open positions."""
-    # Stub for Phase 1
-    return PositionListResponse(positions=[])
+    positions = await list_all_positions()
+    position_responses = PositionMapper.to_response_list(positions)
+    return PositionListResponse(positions=position_responses)
 
 
 @positions_router.get(
@@ -110,10 +122,32 @@ async def list_positions() -> PositionListResponse:
 )
 async def get_position(symbol: str) -> PositionResponse:
     """Get position for specific symbol."""
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Position for {symbol} not found",
-    )
+    position = await repo.get_position_by_symbol(Symbol(value=symbol.upper()))
+    if not position:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Position for {symbol} not found",
+        )
+    return PositionMapper.to_response(position)
+
+
+# In-memory position list helper (until positions repo has list all)
+async def list_all_positions() -> list[Position]:
+    """List all positions - placeholder until DB query is available."""
+    models = await PositionModel.all()
+    return [
+        Position(
+            id=m.id,
+            symbol=Symbol(value=m.symbol),
+            quantity=m.quantity,
+            entry_price=Money(amount=m.entry_price, currency="USD") if m.entry_price else None,
+            current_price=Money(amount=m.current_price, currency="USD") if m.current_price else None,
+            unrealized_pnl=m.unrealized_pnl,
+            created_at=datetime.utcnow(),  # PositionModel tracks updated_at only
+            updated_at=m.updated_at,
+        )
+        for m in models
+    ]
 
 
 # =============================================================================
@@ -128,10 +162,17 @@ async def get_position(symbol: str) -> PositionResponse:
 )
 async def create_genome(request: GenomeCreateRequest) -> GenomeResponse:
     """Save a trained genome."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Genome creation not yet implemented",
+    genome = Genome(
+        genome_data=b"",  # Will be filled from request in Phase 4
+        fitness=request.fitness,
+        generation=request.generation,
+        symbol=Symbol(value=request.symbol) if request.symbol else None,
+        fee_rate=request.fee_rate,
+        slippage_bps=request.slippage_bps,
+        mode=request.mode,
     )
+    saved_genome = await repo.save_genome(genome)
+    return GenomeMapper.to_response(saved_genome)
 
 
 @genomes_router.get(
@@ -144,7 +185,14 @@ async def list_genomes(
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> GenomeListResponse:
     """List genomes with optional filtering."""
-    return GenomeListResponse(genomes=[], total=0)
+    if active_only:
+        genome = await repo.get_active_genome(Symbol(value=symbol) if symbol else None)
+        genomes = [genome] if genome else []
+    else:
+        genome_symbol = Symbol(value=symbol) if symbol else None
+        genomes = await repo.list_genomes(symbol=genome_symbol, limit=limit)
+    genome_responses = GenomeMapper.to_response_list(genomes)
+    return GenomeListResponse(genomes=genome_responses, total=len(genome_responses))
 
 
 @genomes_router.get(
@@ -153,10 +201,13 @@ async def list_genomes(
 )
 async def get_active_genome() -> GenomeResponse:
     """Get currently active genome for trading."""
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="No active genome found",
-    )
+    genome = await repo.get_active_genome()
+    if not genome:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active genome found",
+        )
+    return GenomeMapper.to_response(genome)
 
 
 @genomes_router.post(
@@ -165,10 +216,19 @@ async def get_active_genome() -> GenomeResponse:
 )
 async def activate_genome(request: GenomeActivateRequest) -> GenomeResponse:
     """Activate a genome for live trading."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Genome activation not yet implemented",
-    )
+    success = await repo.activate_genome(request.genome_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Genome {request.genome_id} not found",
+        )
+    genome = await repo.get_genome_by_id(request.genome_id)
+    if not genome:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Genome {request.genome_id} not found after activation",
+        )
+    return GenomeMapper.to_response(genome)
 
 
 @genomes_router.get(
@@ -177,10 +237,13 @@ async def activate_genome(request: GenomeActivateRequest) -> GenomeResponse:
 )
 async def get_genome(genome_id: int) -> GenomeResponse:
     """Get genome by ID."""
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Genome {genome_id} not found",
-    )
+    genome = await repo.get_genome_by_id(genome_id)
+    if not genome:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Genome {genome_id} not found",
+        )
+    return GenomeMapper.to_response(genome)
 
 
 # =============================================================================
@@ -198,7 +261,9 @@ async def list_risk_events(
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> RiskEventListResponse:
     """List risk events with filtering."""
-    return RiskEventListResponse(events=[], total=0)
+    events = await repo.list_risk_events(severity=severity, acknowledged=acknowledged, limit=limit)
+    event_responses = RiskEventMapper.to_response_list(events)
+    return RiskEventListResponse(events=event_responses, total=len(event_responses))
 
 
 @risk_router.post(
@@ -210,10 +275,13 @@ async def acknowledge_risk_event(
     request: RiskEventAcknowledgeRequest,
 ) -> RiskEventResponse:
     """Acknowledge a risk event."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Risk event acknowledgment not yet implemented",
-    )
+    event = await repo.acknowledge_risk_event(event_id, request.user, request.action)
+    if not event:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Risk event {event_id} not found",
+        )
+    return RiskEventMapper.to_response(event)
 
 
 @risk_router.get(
@@ -222,6 +290,7 @@ async def acknowledge_risk_event(
 )
 async def get_risk_status() -> dict[str, Any]:
     """Get current risk status summary."""
+    # Placeholder - full implementation in Phase 4 with exchange adapters
     return {
         "status": "ok",
         "drawdown": 0.0,
@@ -241,11 +310,10 @@ async def get_risk_status() -> dict[str, Any]:
 )
 async def get_price(symbol: str) -> PriceResponse:
     """Get current price for symbol."""
-    # Stub for Phase 1
-    return PriceResponse(
-        symbol=symbol.upper(),
-        price=50000.0,
-        timestamp=datetime.utcnow(),
+    # Placeholder - full implementation in Phase 4 with exchange adapters
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Market data requires Phase 4 exchange adapters",
     )
 
 
@@ -259,6 +327,7 @@ async def get_candles(
     end: datetime | None = None,
 ) -> MarketDataListResponse:
     """Get OHLCV candles for symbol."""
+    # Placeholder - full implementation in Phase 4 with data pipeline
     return MarketDataListResponse(
         symbol=symbol.upper(),
         candles=[],
@@ -276,6 +345,7 @@ async def get_candles(
 )
 async def get_portfolio() -> PortfolioResponse:
     """Get complete portfolio summary."""
+    # Placeholder - full implementation in Phase 4 with exchange adapters
     return PortfolioResponse(
         total_value=10000.0,
         cash_value=10000.0,
@@ -290,10 +360,9 @@ async def get_portfolio() -> PortfolioResponse:
 )
 async def get_balance() -> BalanceResponse:
     """Get account balances."""
+    # Placeholder - full implementation in Phase 4 with exchange adapters
     return BalanceResponse(
-        balances=[
-            {"asset": "USDT", "free": 10000.0, "locked": 0.0, "total": 10000.0},
-        ]
+        balances=[],
     )
 
 
@@ -343,7 +412,7 @@ async def evaluate_signal(request: NeatSignalRequest) -> NeatSignalResponse:
 
 def get_trading_router() -> APIRouter:
     """Assemble all trading routes into main router."""
-    router = APIRouter(prefix="/api/v1", tags=["trading"])
+    router = APIRouter(tags=["trading"])
 
     router.include_router(trades_router)
     router.include_router(positions_router)

@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_bucket: str = "stonks-trading-data"
 
+    # API Server
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "console"  # "json" or "console"
