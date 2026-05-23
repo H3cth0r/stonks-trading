@@ -9,7 +9,8 @@ Implements the exact trading strategy from NEAT/main.py with:
 - RecurrentNetwork for temporal dynamics
 """
 
+from stonks_trading.bots.neat_swing.bot import NeatSwingBot
 from stonks_trading.bots.neat_swing.state import NeatSwingState
 from stonks_trading.bots.neat_swing.strategy import NeatSwingStrategy
 
-__all__ = ["NeatSwingState", "NeatSwingStrategy"]
+__all__ = ["NeatSwingBot", "NeatSwingState", "NeatSwingStrategy"]

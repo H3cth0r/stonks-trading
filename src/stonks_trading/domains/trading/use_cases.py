@@ -20,15 +20,17 @@ from stonks_trading.domains.trading.entities import (
 from stonks_trading.domains.trading.enums import RiskLevel, Side
 from stonks_trading.domains.trading.repositories import (
     save_position,
+    save_position_with_context,
     save_risk_event,
     save_trade,
+    save_trade_with_context,
 )
 from stonks_trading.domains.trading.services import (
     FeeCalculator,
     InstrumentMapper,
     RiskChecker,
 )
-from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.domains.trading.value_objects import BotContext, Money, Symbol
 
 
 class ExecuteTradeUseCase:
@@ -566,3 +568,165 @@ class PlaceOrderUseCase:
             position=saved_position,
             risk_check=risk_result,
         )
+
+
+class ExecuteBotTradeUseCase:
+    """Execute trade for bot with full state and context tracking.
+
+    Orchestrates trade execution for the live bot with:
+    - BotContext for multi-bot isolation
+    - NeatSwingState integration (equity, peak, trades_today)
+    - Bot-scoped persistence
+    - Full risk validation
+    """
+
+    def __init__(
+        self,
+        adapter: IExchangeAdapter,
+        risk_checker: RiskChecker,
+        fee_calculator: FeeCalculator,
+    ):
+        """Initialize use case with services.
+
+        Args:
+            adapter: Exchange adapter for order execution
+            risk_checker: Risk validation service
+            fee_calculator: Fee calculation service
+        """
+        self.adapter = adapter
+        self.risk_checker = risk_checker
+        self.fee_calculator = fee_calculator
+
+    async def execute(
+        self,
+        symbol: Symbol,
+        side: Side,
+        quantity: float,
+        candle: dict[str, Any],
+        current_position: Position | None,
+        state: Any,
+        context: BotContext,
+    ) -> ExecuteTradeResult:
+        """Execute trade with bot context and state.
+
+        Args:
+            symbol: Trading symbol
+            side: Buy or sell
+            quantity: Amount to trade
+            candle: Current candle dict with 'close' price
+            current_position: Existing position if any
+            state: NeatSwingState with equity, peak_equity, trades_today, etc.
+            context: BotContext for multi-bot isolation
+
+        Returns:
+            ExecuteTradeResult with trade details or error
+        """
+        # Get current price
+        price = Money(amount=candle["close"], currency="USDT")
+        notional = Money(amount=price.amount * quantity, currency=price.currency)
+
+        # Compute risk parameters from state
+        portfolio_value = Money(amount=state.current_equity, currency="USDT")
+        minutes_since_last_trade = 999
+        if state.last_trade_time:
+            delta = datetime.utcnow() - state.last_trade_time
+            minutes_since_last_trade = int(delta.total_seconds() / 60)
+        current_drawdown = 0.0
+        if state.peak_equity > 0:
+            current_drawdown = (state.peak_equity - state.current_equity) / state.peak_equity
+
+        # Risk check
+        risk_result = self.risk_checker.check_trade(
+            side=side,
+            notional=notional,
+            portfolio_value=portfolio_value,
+            current_position=current_position,
+            daily_trade_count=state.trades_today,
+            minutes_since_last_trade=minutes_since_last_trade,
+            current_drawdown=current_drawdown,
+            daily_loss_pct=state.daily_loss_pct,
+            in_safe_mode=state.in_safe_mode,
+            last_realized_loss_time=state.last_realized_loss_time,
+        )
+
+        if not risk_result.allowed:
+            return ExecuteTradeResult(
+                success=False,
+                risk_check=risk_result,
+                error=f"Risk check failed: {risk_result.reason}",
+            )
+
+        # Execute via adapter
+        order_result = await self.adapter.place_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type="market",
+        )
+
+        if not order_result.success:
+            return ExecuteTradeResult(
+                success=False,
+                risk_check=risk_result,
+                error=f"Order failed: {order_result.error}",
+            )
+
+        # Calculate fee
+        fill_price = order_result.fill_price or price
+        fill_notional = Money(
+            amount=fill_price.amount * order_result.filled_quantity,
+            currency=fill_price.currency,
+        )
+        fee = self.fee_calculator.calculate_fee(fill_notional, is_maker=False)
+
+        # Build trade entity with bot context
+        trade = Trade(
+            symbol=symbol,
+            side=side,
+            fill_price=fill_price,
+            quantity=order_result.filled_quantity,
+            fee=fee,
+            order_id=order_result.order_id,
+            bot_type=context.bot_type,
+            bot_instance_id=context.instance_id,
+        )
+
+        # Persist with bot context
+        saved_trade = await save_trade_with_context(trade, context)
+
+        # Update position
+        updated_position = self._update_position(current_position, side, trade, context)
+        if updated_position:
+            await save_position_with_context(updated_position, context)
+
+        return ExecuteTradeResult(
+            success=True,
+            trade=saved_trade,
+            position=updated_position,
+            risk_check=risk_result,
+        )
+
+    def _update_position(
+        self,
+        current: Position | None,
+        side: Side,
+        trade: Trade,
+        context: BotContext,
+    ) -> Position | None:
+        """Update position after trade."""
+        if side == Side.BUY:
+            if current:
+                current.add_to_position(trade.quantity, trade.fill_price)
+                return current
+            return Position(
+                symbol=trade.symbol,
+                quantity=trade.quantity,
+                entry_price=trade.fill_price,
+                bot_type=context.bot_type,
+                bot_instance_id=context.instance_id,
+            )
+        else:  # SELL
+            if current:
+                current.reduce_position(trade.quantity)
+                return current if current.quantity > 0 else None
+            return None

@@ -20,9 +20,24 @@ class DiscordNotifier:
     Sends rich embeds for trade execution, risk events, and daily summaries.
     """
 
-    def __init__(self, webhook_url: str):
+    def __init__(self, webhook_url: str, bot_context: Any = None):
         self.webhook_url = webhook_url
         self.client = httpx.AsyncClient(timeout=10.0)
+        self.bot_context = bot_context
+
+    def with_bot_context(self, bot_type: str, instance_id: str) -> "DiscordNotifier":
+        """Create a notifier instance with bot context for notifications.
+
+        Args:
+            bot_type: Type of bot (e.g., "neat_swing")
+            instance_id: Bot instance ID
+
+        Returns:
+            DiscordNotifier with bot context set
+        """
+        notifier = DiscordNotifier(self.webhook_url)
+        notifier.bot_context = {"bot_type": bot_type, "instance_id": instance_id}
+        return notifier
 
     async def send_message(
         self,
@@ -72,6 +87,15 @@ class DiscordNotifier:
                 }
             )
 
+        # Build bot context footer
+        if self.bot_context:
+            footer_text = f"Bot: {self.bot_context['bot_type']}/{self.bot_context['instance_id']}"
+            if trade.genome_id:
+                footer_text += f" • Genome #{trade.genome_id}"
+            footer_text += f" • {trade.exchange}"
+        else:
+            footer_text = f"Genome #{trade.genome_id or 'N/A'} • {trade.exchange}"
+
         embed = {
             "title": f"Trade Executed: {trade.symbol.value}",
             "description": f"Mode: **{trade.mode.value}**",
@@ -80,7 +104,7 @@ class DiscordNotifier:
             "timestamp": trade.created_at.isoformat()
             if trade.created_at
             else datetime.utcnow().isoformat(),
-            "footer": {"text": f"Genome #{trade.genome_id or 'N/A'} • {trade.exchange}"},
+            "footer": {"text": footer_text},
         }
 
         return await self.send_message(
@@ -104,6 +128,17 @@ class DiscordNotifier:
         color = color_map.get(severity.lower(), 0xFFA500)
 
         fields = [{"name": k, "value": str(v), "inline": True} for k, v in (details or {}).items()]
+
+        # Add bot context field if available
+        if self.bot_context:
+            fields.insert(
+                0,
+                {
+                    "name": "Bot",
+                    "value": f"{self.bot_context['bot_type']}/{self.bot_context['instance_id']}",
+                    "inline": True,
+                },
+            )
 
         embed = {
             "title": f"Risk Alert: {event_type}",
@@ -159,6 +194,13 @@ class DiscordNotifier:
             ],
             "footer": {"text": "Retraining starts at 00:00 UTC"},
         }
+
+        # Add bot context to embed if available
+        if self.bot_context:
+            embed["description"] = (
+                f"Bot: **{self.bot_context['bot_type']}/{self.bot_context['instance_id']}**\n"
+                + embed["description"]
+            )
         return await self.send_message("Daily Trading Summary", embeds=[embed])
 
     async def close(self) -> None:
