@@ -32,6 +32,19 @@ class ExecuteTradeResult:
 
 
 @dataclass
+class Signal:
+    """Trading signal from strategy.
+
+    Domain entity representing a buy/sell signal with confidence.
+    Returned by strategy.generate_signal().
+    """
+
+    action: Side
+    confidence: float
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class EvaluateSignalResult:
     """Result of signal evaluation.
 
@@ -479,7 +492,7 @@ class SystemConfig:
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
     @classmethod
-    def from_kv(cls, key: str, value: Any) -> "SystemConfig":
+    def from_kv(cls, key: str, value: Any) -> SystemConfig:
         """Create from key-value pair."""
         return cls(key=key, value=value)
 
