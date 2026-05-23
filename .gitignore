@@ -111,3 +111,6 @@ secrets.yml
 .dockerignore
 Dockerfile.*
 !infra/Dockerfile.*
+
+# TEMP FILES
+tmp/
