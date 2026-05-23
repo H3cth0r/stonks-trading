@@ -20,7 +20,6 @@ from stonks_trading.domains.trading.entities import Signal
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.value_objects import Symbol
 
-
 # Exact constants from NEAT/main.py
 DECISION_THRESHOLD = 0.6
 TRANSACTION_FEE = 0.001
@@ -95,8 +94,6 @@ class NeatSwingStrategy(BaseStrategy):
         import ta
 
         closes = pd.Series([c["close"] for c in candles])
-        highs = pd.Series([c.get("high", c["close"]) for c in candles])
-        lows = pd.Series([c.get("low", c["close"]) for c in candles])
 
         # Create sequential datetime index if not present (for resampling)
         start_time = pd.Timestamp("2024-01-01")
@@ -200,10 +197,7 @@ class NeatSwingStrategy(BaseStrategy):
             7-element state vector with values clipped to [-5, 5].
         """
         # 1. Is Invested
-        if current_position and current_position.quantity > 0:
-            is_invested = 1.0
-        else:
-            is_invested = -1.0
+        is_invested = 1.0 if current_position and current_position.quantity > 0 else -1.0
 
         # 2. Unrealized PnL
         if (
@@ -230,7 +224,8 @@ class NeatSwingStrategy(BaseStrategy):
         state = np.hstack(([is_invested, unrealized_pnl], mkt))
 
         # Clean inputs - clip to [-5, 5] and handle NaN (exact from NEAT/main.py line 136)
-        return np.nan_to_num(np.clip(state, -5.0, 5.0)).tolist()
+        result: list[float] = np.nan_to_num(np.clip(state, -5.0, 5.0)).tolist()
+        return result
 
     def load_genome(
         self,
@@ -296,8 +291,7 @@ class NeatSwingStrategy(BaseStrategy):
                 return Side.BUY
 
         # Sell Signal (NEAT/main.py line 169)
-        elif sell_prob > DECISION_THRESHOLD and sell_prob > buy_prob:
-            if is_invested:
-                return Side.SELL
+        elif sell_prob > DECISION_THRESHOLD and sell_prob > buy_prob and is_invested:
+            return Side.SELL
 
         return None

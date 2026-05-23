@@ -9,7 +9,7 @@ The orchestrator coordinates the data ingestion pipeline:
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stonks_trading.domains.trading.value_objects import Symbol
@@ -106,9 +106,8 @@ class IngestionOrchestrator:
         Args:
             symbol: Symbol to backfill
         """
-        from datetime import timezone
 
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         start = end - timedelta(hours=24)
 
         # Check what we already have
@@ -116,7 +115,7 @@ class IngestionOrchestrator:
         if latest:
             # Handle timezone-aware vs timezone-naive datetime comparison
             if latest.tzinfo is None:
-                latest = latest.replace(tzinfo=timezone.utc)
+                latest = latest.replace(tzinfo=UTC)
             start = latest + timedelta(minutes=1)
 
         if start >= end:

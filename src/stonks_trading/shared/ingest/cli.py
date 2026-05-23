@@ -10,7 +10,7 @@ Provides command-line interface for:
 import asyncio
 import signal
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import click
 
@@ -129,7 +129,7 @@ def ingest(
             )
             try:
                 await asyncio.wait_for(shutdown_event.wait(), timeout=duration * 60)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.info("Ingestion duration reached")
         else:
             logger.info(
@@ -182,9 +182,8 @@ def backfill(
         # Backfill 7 days of BTC data
         python -m stonks_trading.shared.ingest.cli backfill --symbol BTC_USD --days 7
     """
-    from datetime import timezone
     target = Symbol(value=symbol)
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(days=days)
 
     click.echo(f"Backfilling {symbol} from {start} to {end}...")
@@ -204,7 +203,7 @@ def backfill(
 
         except Exception as e:
             click.echo(f"Backfill failed: {e}", err=True)
-            raise click.ClickException(str(e))
+            raise click.ClickException(str(e)) from None
         finally:
             await adapter.disconnect()
             duckdb.close()
@@ -272,7 +271,7 @@ def verify_features() -> None:
         candles.append(Candle(
             symbol="BTC_USD",
             venue="test",
-            timestamp=datetime.now(timezone.utc) - timedelta(minutes=250 * 60 - i),
+            timestamp=datetime.now(UTC) - timedelta(minutes=250 * 60 - i),
             open=base_price + noise,
             high=base_price + noise + 50,
             low=base_price + noise - 50,

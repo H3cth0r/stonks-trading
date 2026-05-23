@@ -7,6 +7,7 @@ They operate on entities and value objects.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from stonks_trading.domains.trading.entities import Position, RiskCheckResult
 from stonks_trading.domains.trading.enums import RiskLevel, Side
@@ -15,6 +16,9 @@ from stonks_trading.domains.trading.value_objects import (
     Money,
     Symbol,
 )
+
+if TYPE_CHECKING:
+    from stonks_trading.domains.trading.adapters import IExchangeAdapter
 
 
 class RiskChecker:
@@ -278,7 +282,7 @@ class FeeCalculator:
         self.tier = tiers.get(tier_name, self.DEFAULT_TIERS["binance_default"])
         self._live_tier: FeeTier | None = None
 
-    async def refresh_tier(self, adapter: "IExchangeAdapter") -> FeeTier:
+    async def refresh_tier(self, adapter: IExchangeAdapter) -> FeeTier:
         """Fetch live fee tier from exchange and cache it."""
         fee_data = await adapter.get_fee_tier()
         maker = fee_data.get("maker_rate", fee_data.get("maker_commission", self.tier.maker_rate))

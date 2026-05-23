@@ -16,12 +16,12 @@ import signal
 import sys
 from typing import Any
 
+from stonks_trading.bots.base.context import BotContext
 from stonks_trading.bots.neat_swing.bot import NeatSwingBot
 from stonks_trading.bots.neat_swing.state import NeatSwingState
 from stonks_trading.bots.neat_swing.strategy import NeatSwingStrategy
-from stonks_trading.bots.base.context import BotContext
-from stonks_trading.domains.trading.enums import TradingMode
 from stonks_trading.domains.trading.adapters import DryRunAdapter
+from stonks_trading.domains.trading.enums import TradingMode
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.scheduler import Scheduler
 from stonks_trading.shared.websocket_client import WebSocketClient
@@ -111,7 +111,7 @@ async def run_bot(
     context = BotContext(bot_type="neat_swing", instance_id=instance_id)
 
     # Create symbols
-    symbol_objects = [Symbol(s) for s in symbols]
+    symbol_objects = [Symbol(value=s) for s in symbols]
 
     # Create strategy
     strategy = NeatSwingStrategy(config_path=config_path)

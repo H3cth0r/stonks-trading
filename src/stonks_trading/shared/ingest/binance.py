@@ -5,6 +5,7 @@ supporting real-time WebSocket streaming and REST API backfill.
 """
 
 import asyncio
+import contextlib
 import json
 from datetime import datetime
 from typing import Any
@@ -155,7 +156,7 @@ class BinanceAdapter(MarketDataAdapter):
                 error=str(e),
                 url=url,
             )
-            raise ConnectionError(f"Failed to connect to Binance WebSocket: {e}")
+            raise ConnectionError(f"Failed to connect to Binance WebSocket: {e}") from e
 
     async def _message_loop(self) -> None:
         """Main WebSocket message loop with auto-reconnect.
@@ -366,10 +367,8 @@ class BinanceAdapter(MarketDataAdapter):
         # Cancel message loop task
         if self._message_task and not self._message_task.done():
             self._message_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._message_task
-            except asyncio.CancelledError:
-                pass
 
         # Close WebSocket
         if self.ws:

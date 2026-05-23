@@ -15,16 +15,15 @@ from stonks_trading.bots import BotRegistry
 from stonks_trading.bots.base.bot import BaseBot
 from stonks_trading.bots.neat_swing.state import NeatSwingState
 from stonks_trading.bots.neat_swing.strategy import (
-    DECISION_THRESHOLD,
     MIN_TRADE_INTERVAL,
     NeatSwingStrategy,
 )
-from stonks_trading.domains.trading.adapters import IExchangeAdapter
 from stonks_trading.domains.trading.entities import Position
 from stonks_trading.domains.trading.enums import Side, TradingMode
 from stonks_trading.domains.trading.repositories import (
     BotInstanceRepository,
     BotStateRepository,
+    get_active_genome,
 )
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import ExecuteBotTradeUseCase
@@ -73,7 +72,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         self.config_path = config_path
         self.candle_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._running = False
-        self._websocket = None  # Injected by runner
+        self._websocket: Any | None = None  # Injected by runner
 
     @property
     def bot_type(self) -> str:
@@ -166,8 +165,6 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
 
     async def _load_active_genomes(self) -> None:
         """Load active NEAT genomes for all symbols."""
-        from stonks_trading.domains.trading.repositories import get_active_genome
-
         for symbol in self.symbols:
             genome = await get_active_genome(symbol)
             if genome and genome.genome_data:
@@ -186,7 +183,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                     self.candle_queue.get(), timeout=60.0
                 )
 
-                symbol = Symbol(candle["symbol"])
+                symbol = Symbol(value=candle["symbol"])
                 if symbol not in self.strategy.networks:
                     logger.debug(f"No network for {symbol}, skipping")
                     continue
@@ -212,7 +209,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                             f"Executed {action.value} for {symbol} at {candle['close']}"
                         )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Heartbeat - no candles received
                 continue
             except Exception as e:
@@ -232,18 +229,6 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             State vector for network activation
         """
         position = self.state.positions.get(symbol)
-
-        # Get is_invested
-        is_invested = (
-            1.0 if position and position.quantity > 0 else -1.0
-        )
-
-        # Get unrealized PnL
-        unrealized_pnl = 0.0
-        if position and position.quantity > 0 and position.entry_price:
-            unrealized_pnl = (
-                candle["close"] - position.entry_price.amount
-            ) / position.entry_price.amount
 
         # Get market features from strategy
         features = self.strategy.compute_features(symbol, [candle])
@@ -386,7 +371,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             # Calculate max quantity with fees
             fee_rate = 0.001  # TRANSACTION_FEE from NEAT
             notional = usdt_balance * (1 - fee_rate)
-            quantity = notional / price
+            quantity: float = notional / price
             return quantity
         else:
             # All-out: sell entire position

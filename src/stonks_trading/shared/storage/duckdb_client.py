@@ -230,7 +230,7 @@ class DuckDBClient:
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
 
-        return [dict(zip(columns, row)) for row in rows]
+        return [dict(zip(columns, row, strict=False)) for row in rows]
 
     def get_data_range(
         self,
@@ -264,7 +264,7 @@ class DuckDBClient:
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
 
-        return [dict(zip(columns, row)) for row in rows]
+        return [dict(zip(columns, row, strict=False)) for row in rows]
 
     def get_latest_timestamp(self, symbol: Symbol) -> datetime | None:
         """Get the timestamp of the most recent candle for a symbol.

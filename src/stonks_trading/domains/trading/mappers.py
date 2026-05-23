@@ -5,6 +5,8 @@ They handle conversion between internal domain representation
 and external API format.
 """
 
+from typing import Any
+
 from stonks_trading.domains.trading.dtos import (
     BalanceItem,
     BalanceResponse,
@@ -19,7 +21,6 @@ from stonks_trading.domains.trading.dtos import (
 from stonks_trading.domains.trading.entities import (
     Balance,
     BotInstance,
-    BotState,
     Genome,
     MarketData,
     Position,

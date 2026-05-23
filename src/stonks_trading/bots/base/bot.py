@@ -72,7 +72,7 @@ class BaseBot(ABC, Generic[StateT, StrategyT]):
         self.state = initial_state
 
         # Injected at runtime (set by start() or factory)
-        self.adapter = None
+        self.adapter: Any | None = None
 
     @property
     @abstractmethod

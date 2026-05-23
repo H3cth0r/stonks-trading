@@ -4,13 +4,12 @@ APScheduler wrapper for daily retraining and genome hot-swap.
 Runs at 00:00 UTC every day.
 """
 
-import asyncio
 import logging
-from datetime import datetime
+from collections.abc import Callable
 from typing import Any
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
+from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ class Scheduler:
     other periodic tasks like status updates.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize scheduler."""
         self._scheduler = AsyncIOScheduler()
         self._running = False
@@ -47,7 +46,7 @@ class Scheduler:
 
     def schedule_daily_retrain(
         self,
-        callback: callable,
+        callback: Callable[..., Any],
         hour: int = 0,
         minute: int = 0,
         timezone: str = "UTC",
@@ -72,7 +71,7 @@ class Scheduler:
 
     def schedule_interval(
         self,
-        callback: callable,
+        callback: Callable[..., Any],
         minutes: int | None = None,
         hours: int | None = None,
         seconds: int | None = None,
@@ -122,7 +121,7 @@ class Scheduler:
         else:
             raise ValueError("Must specify interval in minutes, hours, or seconds")
 
-        return job.id
+        return str(job.id)
 
     def remove_job(self, job_id: str) -> None:
         """Remove a scheduled job.

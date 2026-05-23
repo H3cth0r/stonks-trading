@@ -150,7 +150,8 @@ def compute_state_vector(
     state = np.hstack((position_state, mkt))
 
     # Clean inputs - clip to [-5, 5] and handle NaN (NEAT/main.py line 136)
-    return np.nan_to_num(np.clip(state, -5.0, 5.0)).tolist()
+    result: list[float] = np.nan_to_num(np.clip(state, -5.0, 5.0)).tolist()
+    return result
 
 
 # Constants from NEAT/main.py

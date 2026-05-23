@@ -190,7 +190,7 @@ class TestNeatSwingBotStart:
 
         with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
              patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state, \
-             patch("stonks_trading.domains.trading.repositories.get_active_genome") as mock_genome, \
+             patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome, \
              patch.object(bot, "_main_loop", side_effect=break_loop):
             mock_repo.register = AsyncMock()
             mock_repo.update_status = AsyncMock()
@@ -214,7 +214,7 @@ class TestNeatSwingBotStart:
 
         with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
              patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state, \
-             patch("stonks_trading.domains.trading.repositories.get_active_genome") as mock_genome, \
+             patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome, \
              patch.object(bot, "_main_loop", side_effect=break_loop):
             mock_repo.register = AsyncMock()
             mock_repo.update_status = AsyncMock()

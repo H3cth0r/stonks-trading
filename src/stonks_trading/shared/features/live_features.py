@@ -8,7 +8,6 @@ MUST produce identical results to training features (features.py).
 """
 
 import pandas as pd
-import ta
 
 from stonks_trading.domains.trading.neat.features import engineer_features
 from stonks_trading.shared.ingest.adapter import Candle
@@ -193,7 +192,7 @@ class LiveFeatureComputer:
             "total_candles": sum(len(candles) for candles in self._1m_data.values()),
             "symbol_stats": {
                 symbol: self.get_stats(symbol)
-                for symbol in self._1m_data.keys()
+                for symbol in self._1m_data
             },
         }
 

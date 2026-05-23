@@ -580,7 +580,7 @@ async def register_bot(request: BotRegisterRequest) -> BotInstanceResponse:
     response_model=BotStateResponse,
 )
 async def get_bot_state(
-    context: BotContext = Depends(get_bot_context),
+    context: BotContext = Depends(get_bot_context),  # noqa: B008
 ) -> BotStateResponse:
     """Get current state for a bot instance."""
     state = await repo.BotStateRepository.load(context)
@@ -600,7 +600,7 @@ async def get_bot_state(
     response_model=TradeListResponse,
 )
 async def list_bot_trades(
-    context: BotContext = Depends(get_bot_context),
+    context: BotContext = Depends(get_bot_context),  # noqa: B008
     symbol: str | None = Query(default=None, min_length=1),
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> TradeListResponse:
@@ -616,7 +616,7 @@ async def list_bot_trades(
     response_model=PositionListResponse,
 )
 async def list_bot_positions(
-    context: BotContext = Depends(get_bot_context),
+    context: BotContext = Depends(get_bot_context),  # noqa: B008
 ) -> PositionListResponse:
     """List all positions for a specific bot."""
     positions = await repo.list_positions_by_bot(context)

@@ -111,7 +111,7 @@ class NeatSwingState(BaseBotState):
                 current_price = Money(amount=pos_data["current_price"], currency="USDT")
 
             position = Position(
-                symbol=Symbol(symbol_value),
+                symbol=Symbol(value=symbol_value),
                 quantity=pos_data.get("quantity", 0.0),
                 entry_price=entry_price,
                 current_price=current_price,
@@ -119,7 +119,7 @@ class NeatSwingState(BaseBotState):
                 bot_type=pos_data.get("bot_type", "neat_swing"),
                 bot_instance_id=pos_data.get("bot_instance_id", "default"),
             )
-            state.positions[Symbol(symbol_value)] = position
+            state.positions[Symbol(value=symbol_value)] = position
 
         return state
 

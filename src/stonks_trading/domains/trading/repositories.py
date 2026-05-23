@@ -13,7 +13,6 @@ from typing import Any
 from stonks_trading.domains.trading.entities import (
     BotDecision,
     BotInstance,
-    BotState,
     DataGap,
     GenerationMetric,
     Genome,

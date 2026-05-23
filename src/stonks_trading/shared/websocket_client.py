@@ -7,11 +7,10 @@ to all registered bots. Handles reconnection with exponential backoff.
 import asyncio
 import json
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import websockets
-
-from stonks_trading.domains.trading.value_objects import Symbol
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class WebSocketClient:
     def __init__(
         self,
         symbols: list[str],
-        callback: Callable[[dict[str, Any]], None] | None = None,
+        callback: Callable[[dict[str, Any]], Any] | None = None,
         url: str = BINANCE_WS_URL,
     ):
         """Initialize WebSocket client.
@@ -41,13 +40,13 @@ class WebSocketClient:
         self.symbols = [s.lower() for s in symbols]
         self.callback = callback
         self.url = url
-        self._connection = None
+        self._connection: Any | None = None
         self._running = False
         self._reconnect_delay = 1.0
         self._max_reconnect_delay = 60.0
-        self._bot_callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._bot_callbacks: list[Callable[[dict[str, Any]], Any]] = []
 
-    def register_bot(self, callback: Callable[[dict[str, Any]], None]) -> None:
+    def register_bot(self, callback: Callable[[dict[str, Any]], Any]) -> None:
         """Register a bot callback for candle updates.
 
         Args:

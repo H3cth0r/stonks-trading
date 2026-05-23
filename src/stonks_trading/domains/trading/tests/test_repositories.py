@@ -13,7 +13,6 @@ from hypothesis import strategies as st
 
 from stonks_trading.domains.trading.entities import (
     Genome,
-    MarketData,
     Position,
     RiskEvent,
     Trade,
@@ -25,8 +24,6 @@ from stonks_trading.domains.trading.repositories import (
     close_position,
     get_active_genome,
     get_genome_by_id,
-    get_latest_price,
-    get_market_data,
     get_position_by_symbol,
     get_trade_by_id,
     list_genomes,
@@ -34,7 +31,6 @@ from stonks_trading.domains.trading.repositories import (
     list_trades,
     list_trades_by_symbol,
     save_genome,
-    save_market_data,
     save_position,
     save_risk_event,
     save_trade,
@@ -341,52 +337,3 @@ class TestRiskEventRepository:
         assert result is None
 
 
-# =============================================================================
-# Market Data Repository Tests
-# =============================================================================
-
-
-class TestMarketDataRepository:
-    """Property-based tests for market data repository functions."""
-
-    @given(st.data())
-    async def test_save_market_data_returns_data(self, data: st.DataObject) -> None:
-        """Saving market data should return the data."""
-        symbol = generate_fake_symbol()
-        timestamp = fake.date_time_this_year()
-
-        market_data = MarketData(
-            symbol=symbol,
-            timestamp=timestamp,
-            open=fake.pyfloat(min_value=1000.0, max_value=100000.0, right_digits=2),
-            high=fake.pyfloat(min_value=1000.0, max_value=100000.0, right_digits=2),
-            low=fake.pyfloat(min_value=1000.0, max_value=100000.0, right_digits=2),
-            close=fake.pyfloat(min_value=1000.0, max_value=100000.0, right_digits=2),
-            volume=fake.pyfloat(min_value=1.0, max_value=1000.0, right_digits=2),
-        )
-
-        result = await save_market_data(market_data)
-
-        assert result is not None
-        assert result.symbol == symbol
-        assert result.timestamp == timestamp
-
-    @given(st.data())
-    async def test_get_market_data_for_date_range(self, data: st.DataObject) -> None:
-        """Getting market data should support date range."""
-        symbol = generate_fake_symbol()
-        start = fake.date_time_this_year()
-        end = fake.date_time_this_year()
-
-        result = await get_market_data(symbol, start, end)
-
-        assert isinstance(result, list)
-
-    @given(st.data())
-    async def test_get_latest_price_returns_none_for_missing(self, data: st.DataObject) -> None:
-        """Getting latest price for unknown symbol should return None."""
-        symbol = generate_fake_symbol()
-
-        result = await get_latest_price(symbol)
-
-        assert result is None
