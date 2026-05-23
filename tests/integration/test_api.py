@@ -227,7 +227,7 @@ class TestSignalRoutes:
         assert data["should_trade"] is True
 
     async def test_evaluate_signal_sell(self, client) -> None:
-        """Test evaluating sell signal."""
+        """Test evaluating sell signal (no position = should_trade=False)."""
         response = await client.post(
             "/api/v1/signals/evaluate",
             json={
@@ -239,7 +239,9 @@ class TestSignalRoutes:
         assert response.status_code == 200
         data = response.json()
         assert data["action"] == "sell"
-        assert data["should_trade"] is True
+        # With fixed logic: no position exists, so should_trade=False
+        assert data["should_trade"] is False
+        assert "No position to sell" in data["reason"]
 
     async def test_evaluate_signal_no_threshold(self, client) -> None:
         """Test evaluating signal below threshold."""

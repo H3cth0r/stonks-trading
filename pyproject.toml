@@ -193,6 +193,6 @@ exclude_lines = [
 fail_under = 80
 
 [tool.aerich]
-tortoise_orm = "stonks_trading.shared.database.TORTOISE_ORM"
+tortoise_orm = "src.stonks_trading.shared.database.TORTOISE_ORM"
 location = "./migrations"
-src_folder = "./src/stonks_trading"
+src_folder = "./."

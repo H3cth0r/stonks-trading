@@ -42,13 +42,13 @@ from stonks_trading.domains.trading.mappers import (
 )
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import (
+    EvaluateSignalUseCase,
     FetchBalancesUseCase,
     GetCandlesUseCase,
     GetMarketDataUseCase,
     PlaceOrderUseCase,
 )
 from stonks_trading.domains.trading.value_objects import Money, Symbol
-from stonks_trading.shared.postgres_models import PositionModel
 
 # Create router
 trades_router = APIRouter(prefix="/trades", tags=["trades"])
@@ -183,25 +183,10 @@ async def get_position(symbol: str) -> PositionResponse:
     return PositionMapper.to_response(position)
 
 
-# In-memory position list helper (until positions repo has list all)
+# Position list helper - delegates to repository
 async def list_all_positions() -> list[Position]:
-    """List all positions - placeholder until DB query is available."""
-    models = await PositionModel.all()
-    return [
-        Position(
-            id=m.id,
-            symbol=Symbol(value=m.symbol),
-            quantity=m.quantity,
-            entry_price=Money(amount=m.entry_price, currency="USD") if m.entry_price else None,
-            current_price=Money(amount=m.current_price, currency="USD")
-            if m.current_price
-            else None,
-            unrealized_pnl=m.unrealized_pnl,
-            created_at=datetime.utcnow(),  # PositionModel tracks updated_at only
-            updated_at=m.updated_at,
-        )
-        for m in models
-    ]
+    """List all positions - delegates to repository."""
+    return await repo.list_positions()
 
 
 # =============================================================================
@@ -484,28 +469,27 @@ async def evaluate_signal(request: NeatSignalRequest) -> NeatSignalResponse:
     This endpoint allows testing NEAT signal evaluation without
     executing actual trades.
     """
-    # Apply NEAT decision logic
-    threshold = 0.6
+    # Delegate to use case for business logic
+    use_case = EvaluateSignalUseCase(
+        risk_checker=RiskChecker(),
+        decision_threshold=0.6,
+    )
 
-    if request.buy_prob > threshold and request.buy_prob > request.sell_prob:
-        return NeatSignalResponse(
-            action="buy",
-            confidence=request.buy_prob,
-            should_trade=True,
-        )
-    elif request.sell_prob > threshold and request.sell_prob > request.buy_prob:
-        return NeatSignalResponse(
-            action="sell",
-            confidence=request.sell_prob,
-            should_trade=True,
-        )
-    else:
-        return NeatSignalResponse(
-            action=None,
-            confidence=max(request.buy_prob, request.sell_prob),
-            should_trade=False,
-            reason="No signal exceeds threshold",
-        )
+    result = use_case.evaluate(
+        buy_prob=request.buy_prob,
+        sell_prob=request.sell_prob,
+        current_position=None,  # Signal evaluation is position-agnostic
+        portfolio_value=Money(amount=request.portfolio_value or 10000.0, currency="USDT"),
+        daily_trade_count=0,
+        minutes_since_last_trade=999,
+    )
+
+    return NeatSignalResponse(
+        action=result.action.value if result.action else None,
+        confidence=result.confidence,
+        should_trade=result.should_trade,
+        reason=result.reason,
+    )
 
 
 # =============================================================================

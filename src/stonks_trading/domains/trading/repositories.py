@@ -12,6 +12,8 @@ from typing import Any
 
 from stonks_trading.domains.trading.entities import (
     BotDecision,
+    BotInstance,
+    BotState,
     DataGap,
     GenerationMetric,
     Genome,
@@ -23,9 +25,11 @@ from stonks_trading.domains.trading.entities import (
     TrainingRun,
 )
 from stonks_trading.domains.trading.enums import Side, TradingMode
-from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.domains.trading.value_objects import BotContext, Money, Symbol
 from stonks_trading.shared.postgres_models import (
     BotDecisionModel,
+    BotInstanceModel,
+    BotStateModel,
     DataGapModel,
     GenerationMetricModel,
     GenomeModel,
@@ -38,13 +42,16 @@ from stonks_trading.shared.postgres_models import (
     TrainingRunModel,
 )
 
+# Default context for backward compatibility (Phase 5)
+DEFAULT_CONTEXT = BotContext(bot_type="neat_swing", instance_id="default")
+
 # =============================================================================
 # Trade Repository Functions
 # =============================================================================
 
 
-async def save_trade(trade: Trade) -> Trade:
-    """Persist trade using Tortoise ORM."""
+async def save_trade_with_context(trade: Trade, context: BotContext) -> Trade:
+    """Persist trade with bot context using Tortoise ORM."""
     model = await TradeModel.create(
         symbol=trade.symbol.value,
         side=TradeSide(trade.side.value),
@@ -68,9 +75,19 @@ async def save_trade(trade: Trade) -> Trade:
         latency_ms=trade.latency_ms,
         exchange=trade.exchange,
         strategy=trade.strategy,
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
     )
     trade.id = model.id
     return trade
+
+
+async def save_trade(trade: Trade) -> Trade:
+    """Persist trade using Tortoise ORM (legacy wrapper with default context)."""
+    context = DEFAULT_CONTEXT
+    if trade.bot_type != DEFAULT_CONTEXT.bot_type or trade.bot_instance_id != DEFAULT_CONTEXT.instance_id:
+        context = BotContext(bot_type=trade.bot_type, instance_id=trade.bot_instance_id)
+    return await save_trade_with_context(trade, context)
 
 
 async def get_trade_by_id(trade_id: int) -> Trade | None:
@@ -97,9 +114,28 @@ async def list_trades_by_symbol(
     return [_model_to_trade(m) for m in models]
 
 
+async def list_trades_by_bot(
+    context: BotContext,
+    symbol: Symbol | None = None,
+    limit: int = 100,
+) -> list[Trade]:
+    """List trades for a specific bot context."""
+    query = TradeModel.filter(
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
+    )
+    if symbol:
+        query = query.filter(symbol=symbol.value)
+    models = await query.limit(limit).order_by("-created_at")
+    return [_model_to_trade(m) for m in models]
+
+
 async def list_trades(limit: int = 100, offset: int = 0) -> list[Trade]:
-    """List all trades with pagination."""
-    models = await TradeModel.all().offset(offset).limit(limit).order_by("-created_at")
+    """List all trades with pagination (legacy wrapper with default context)."""
+    models = await TradeModel.filter(
+        bot_type=DEFAULT_CONTEXT.bot_type,
+        bot_instance_id=DEFAULT_CONTEXT.instance_id,
+    ).offset(offset).limit(limit).order_by("-created_at")
     return [_model_to_trade(m) for m in models]
 
 
@@ -132,6 +168,8 @@ def _model_to_trade(model: TradeModel) -> Trade:
         exchange=model.exchange,
         strategy=model.strategy,
         created_at=model.created_at,
+        bot_type=model.bot_type,
+        bot_instance_id=model.bot_instance_id,
     )
 
 
@@ -149,17 +187,30 @@ async def count_trades_today() -> int:
 # =============================================================================
 
 
-async def get_position_by_symbol(symbol: Symbol) -> Position | None:
-    """Get open position for symbol."""
-    model = await PositionModel.get_or_none(symbol=symbol.value)
+async def get_position_by_bot_and_symbol(context: BotContext, symbol: Symbol) -> Position | None:
+    """Get open position for symbol within bot context."""
+    model = await PositionModel.get_or_none(
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
+        symbol=symbol.value,
+    )
     if not model:
         return None
     return _model_to_position(model)
 
 
-async def save_position(position: Position) -> Position:
-    """Save position. Creates new or updates existing."""
-    existing = await PositionModel.get_or_none(symbol=position.symbol.value)
+async def get_position_by_symbol(symbol: Symbol) -> Position | None:
+    """Get open position for symbol (legacy wrapper with default context)."""
+    return await get_position_by_bot_and_symbol(DEFAULT_CONTEXT, symbol)
+
+
+async def save_position_with_context(position: Position, context: BotContext) -> Position:
+    """Save position within bot context. Creates new or updates existing."""
+    existing = await PositionModel.get_or_none(
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
+        symbol=position.symbol.value,
+    )
     if existing:
         existing.quantity = position.quantity
         existing.entry_price = float(position.entry_price.amount) if position.entry_price else None
@@ -176,19 +227,56 @@ async def save_position(position: Position) -> Position:
             entry_price=float(position.entry_price.amount) if position.entry_price else None,
             current_price=float(position.current_price.amount) if position.current_price else None,
             unrealized_pnl=position.unrealized_pnl,
+            bot_type=context.bot_type,
+            bot_instance_id=context.instance_id,
         )
         position.id = model.id
     return position
 
 
-async def close_position(symbol: Symbol) -> bool:
-    """Close position for symbol."""
-    model = await PositionModel.get_or_none(symbol=symbol.value)
+async def save_position(position: Position) -> Position:
+    """Save position (legacy wrapper with default context)."""
+    context = DEFAULT_CONTEXT
+    if position.bot_type != DEFAULT_CONTEXT.bot_type or position.bot_instance_id != DEFAULT_CONTEXT.instance_id:
+        context = BotContext(bot_type=position.bot_type, instance_id=position.bot_instance_id)
+    return await save_position_with_context(position, context)
+
+
+async def close_position_by_bot(context: BotContext, symbol: Symbol) -> bool:
+    """Close position for symbol within bot context."""
+    model = await PositionModel.get_or_none(
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
+        symbol=symbol.value,
+    )
     if not model:
         return False
     model.quantity = 0.0
     await model.save()
     return True
+
+
+async def close_position(symbol: Symbol) -> bool:
+    """Close position for symbol (legacy wrapper with default context)."""
+    return await close_position_by_bot(DEFAULT_CONTEXT, symbol)
+
+
+async def list_positions_by_bot(context: BotContext) -> list[Position]:
+    """List all positions for a specific bot context."""
+    models = await PositionModel.filter(
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
+    )
+    return [_model_to_position(m) for m in models]
+
+
+async def list_positions() -> list[Position]:
+    """List all positions (legacy wrapper with default context)."""
+    models = await PositionModel.filter(
+        bot_type=DEFAULT_CONTEXT.bot_type,
+        bot_instance_id=DEFAULT_CONTEXT.instance_id,
+    )
+    return [_model_to_position(m) for m in models]
 
 
 def _model_to_position(model: PositionModel) -> Position:
@@ -204,6 +292,8 @@ def _model_to_position(model: PositionModel) -> Position:
         unrealized_pnl=model.unrealized_pnl,
         created_at=datetime.utcnow(),  # PositionModel tracks updated_at only
         updated_at=model.updated_at,
+        bot_type=model.bot_type,
+        bot_instance_id=model.bot_instance_id,
     )
 
 
@@ -730,3 +820,140 @@ async def set_config(key: str, value: Any) -> SystemConfig:
         defaults={"value": value},
     )
     return SystemConfig(key=model.key, value=model.value, id=model.id, updated_at=model.updated_at)
+
+
+# =============================================================================
+# Bot Instance Repository (Phase 5)
+# =============================================================================
+
+
+class BotInstanceRepository:
+    """Repository for bot instance registry."""
+
+    @staticmethod
+    async def register(
+        bot_type: str,
+        instance_id: str,
+        symbols: list[str],
+        mode: str,
+        config: dict[str, Any] | None = None,
+    ) -> BotInstance:
+        """Register a new bot instance."""
+        model = await BotInstanceModel.create(
+            bot_type=bot_type,
+            instance_id=instance_id,
+            symbols=symbols,
+            mode=mode,
+            config=config,
+            status="stopped",
+        )
+        return BotInstance(
+            bot_type=model.bot_type,
+            instance_id=model.instance_id,
+            symbols=model.symbols,
+            mode=TradingMode(model.mode),
+            id=model.id,
+            status=model.status,
+            config=model.config,
+            last_seen_at=model.last_seen_at,
+            created_at=model.created_at,
+        )
+
+    @staticmethod
+    async def get(bot_type: str, instance_id: str) -> BotInstance | None:
+        """Get bot instance by type and ID."""
+        model = await BotInstanceModel.get_or_none(
+            bot_type=bot_type,
+            instance_id=instance_id,
+        )
+        if not model:
+            return None
+        return BotInstance(
+            bot_type=model.bot_type,
+            instance_id=model.instance_id,
+            symbols=model.symbols,
+            mode=TradingMode(model.mode),
+            id=model.id,
+            status=model.status,
+            config=model.config,
+            last_seen_at=model.last_seen_at,
+            created_at=model.created_at,
+        )
+
+    @staticmethod
+    async def update_status(bot_type: str, instance_id: str, status: str) -> bool:
+        """Update bot instance status."""
+        model = await BotInstanceModel.get_or_none(
+            bot_type=bot_type,
+            instance_id=instance_id,
+        )
+        if not model:
+            return False
+        model.status = status
+        await model.save()
+        return True
+
+    @staticmethod
+    async def list_all() -> list[BotInstance]:
+        """List all bot instances."""
+        models = await BotInstanceModel.all()
+        return [
+            BotInstance(
+                bot_type=m.bot_type,
+                instance_id=m.instance_id,
+                symbols=m.symbols,
+                mode=TradingMode(m.mode),
+                id=m.id,
+                status=m.status,
+                config=m.config,
+                last_seen_at=m.last_seen_at,
+                created_at=m.created_at,
+            )
+            for m in models
+        ]
+
+    @staticmethod
+    async def list_by_type(bot_type: str) -> list[BotInstance]:
+        """List bot instances by type."""
+        models = await BotInstanceModel.filter(bot_type=bot_type)
+        return [
+            BotInstance(
+                bot_type=m.bot_type,
+                instance_id=m.instance_id,
+                symbols=m.symbols,
+                mode=TradingMode(m.mode),
+                id=m.id,
+                status=m.status,
+                config=m.config,
+                last_seen_at=m.last_seen_at,
+                created_at=m.created_at,
+            )
+            for m in models
+        ]
+
+
+# =============================================================================
+# Bot State Repository (Phase 5)
+# =============================================================================
+
+
+class BotStateRepository:
+    """Repository for bot state persistence."""
+
+    @staticmethod
+    async def save(context: BotContext, state: dict[str, Any]) -> None:
+        """Save bot state for context."""
+        await BotStateModel.create(
+            bot_type=context.bot_type,
+            bot_instance_id=context.instance_id,
+            state_json=state,
+        )
+
+    @staticmethod
+    async def load(context: BotContext) -> dict[str, Any] | None:
+        """Load most recent bot state for context."""
+        model = await BotStateModel.filter(
+            bot_type=context.bot_type,
+            bot_instance_id=context.instance_id,
+        ).order_by("-created_at").first()
+        return model.state_json if model else None

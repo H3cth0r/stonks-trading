@@ -24,6 +24,7 @@ from stonks_trading.domains.trading.entities import Balance, OrderResult
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.services import InstrumentMapper
 from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.shared.config import settings
 
 
 class IExchangeAdapter(ABC):
@@ -672,8 +673,6 @@ class ExchangeAdapterFactory:
         Returns:
             Configured IExchangeAdapter instance.
         """
-        from stonks_trading.shared.config import settings
-
         effective_mode = (mode or settings.mode).lower()
         effective_venue = (venue or effective_mode).lower()
 

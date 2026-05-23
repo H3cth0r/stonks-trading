@@ -137,6 +137,9 @@ class Trade:
     latency_ms: float = 0.0
     exchange: str = "binance"
     strategy: str = "NEAT_v1"
+    # Phase 5: Bot context fields with defaults for backward compatibility
+    bot_type: str = "neat_swing"
+    bot_instance_id: str = "default"
 
     def calculate_value(self) -> Money:
         """Calculate total value of trade (price * quantity)."""
@@ -174,6 +177,9 @@ class Position:
     # Phase 3 expanded fields
     current_price: Money | None = None
     unrealized_pnl: float = 0.0
+    # Phase 5: Bot context fields with defaults for backward compatibility
+    bot_type: str = "neat_swing"
+    bot_instance_id: str = "default"
 
     def is_open(self) -> bool:
         """Check if position has non-zero quantity."""
@@ -274,6 +280,9 @@ class Genome:
     trained_at: datetime | None = None
     activated_at: datetime | None = None
     deactivated_at: datetime | None = None
+    # Phase 5: Bot activation context (null if not bot-specific)
+    active_for_bot_type: str | None = None
+    active_for_instance_id: str | None = None
 
     def get_config_summary(self) -> dict[str, Any]:
         """Get training configuration summary for display."""
@@ -315,6 +324,9 @@ class RiskEvent:
     acknowledged_at: datetime | None = None
     acknowledged_by: str | None = None
     action_taken: str | None = None
+    # Phase 5: Bot context fields (null for system-level events)
+    bot_type: str = "neat_swing"
+    bot_instance_id: str | None = None
 
     def acknowledge(self, user: str, action: str | None = None) -> None:
         """Mark risk event as acknowledged."""
@@ -347,6 +359,9 @@ class Order:
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     filled_at: datetime | None = None
+    # Phase 5: Bot context fields with defaults for backward compatibility
+    bot_type: str = "neat_swing"
+    bot_instance_id: str = "default"
 
     def is_open(self) -> bool:
         """Check if order is still pending."""
@@ -376,6 +391,9 @@ class BotDecision:
     candle_close_at: datetime = field(default_factory=datetime.utcnow)
     executed: bool = False
     trade_id: int | None = None
+    # Phase 5: Bot context fields with defaults for backward compatibility
+    bot_type: str = "neat_swing"
+    bot_instance_id: str = "default"
 
 
 @dataclass
@@ -502,3 +520,41 @@ class MarketData:
     def is_bearish(self) -> bool:
         """Check if close < open (bearish candle)."""
         return self.close < self.open
+
+
+@dataclass
+class BotInstance:
+    """Bot instance entity for multi-bot registry.
+
+    Tracks registered bot instances with their configuration
+    and current status.
+    """
+
+    bot_type: str
+    instance_id: str
+    symbols: list[str]
+    mode: TradingMode
+    id: int | None = None
+    status: str = "stopped"  # running, stopped, paused, error
+    config: dict[str, Any] | None = None
+    last_seen_at: datetime | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+    def is_active(self) -> bool:
+        """Check if bot is in active state."""
+        return self.status == "running"
+
+
+@dataclass
+class BotState:
+    """Bot state entity for crash recovery.
+
+    Persists bot runtime state for recovery after restart.
+    """
+
+    bot_type: str
+    bot_instance_id: str
+    state_json: dict[str, Any]
+    id: int | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)

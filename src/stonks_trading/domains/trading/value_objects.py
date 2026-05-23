@@ -140,3 +140,23 @@ class Decision(BaseModel):
     def is_confident(self, threshold: float = 0.6) -> bool:
         """Check if either probability exceeds threshold."""
         return self.buy_prob > threshold or self.sell_prob > threshold
+
+
+class BotContext(BaseModel):
+    """Bot context value object for multi-bot isolation.
+
+    Immutable identifier for bot instances that separates
+    data and operations between different bots.
+    """
+
+    bot_type: str = Field(..., min_length=1, max_length=50)
+    instance_id: str = Field(..., min_length=1, max_length=100)
+
+    model_config = {"frozen": True}
+
+    def __str__(self) -> str:
+        return f"{self.bot_type}/{self.instance_id}"
+
+    def to_dict(self) -> dict[str, str]:
+        """Convert to dictionary for serialization."""
+        return {"bot_type": self.bot_type, "bot_instance_id": self.instance_id}

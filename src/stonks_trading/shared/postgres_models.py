@@ -21,6 +21,8 @@ from enum import Enum
 from tortoise import fields
 from tortoise.models import Model
 
+from stonks_trading.domains.trading.enums import BotStatus
+
 
 class TradeSide(str, Enum):
     """Trade side enum for CharEnumField."""
@@ -65,10 +67,18 @@ class TradeModel(Model):
     entry_price = fields.FloatField(null=True)
     latency_ms = fields.FloatField(default=0.0)
     created_at = fields.DatetimeField(auto_now_add=True, index=True)
+    # Phase 5: Bot context fields
+    bot_type = fields.CharField(max_length=50, index=True, default="neat_swing")
+    bot_instance_id = fields.CharField(max_length=100, index=True, default="default")
 
     class Meta:
         table = "trades"
-        indexes = (("symbol", "created_at"), ("mode", "created_at"))
+        indexes = (
+            ("symbol", "created_at"),
+            ("mode", "created_at"),
+            ("bot_type", "bot_instance_id"),
+            ("bot_type", "bot_instance_id", "symbol"),
+        )
 
 
 # =============================================================================
@@ -77,18 +87,23 @@ class TradeModel(Model):
 
 
 class PositionModel(Model):
-    """Current position state."""
+    """Current position state with bot context."""
 
     id = fields.BigIntField(pk=True)
-    symbol = fields.CharField(max_length=20, unique=True)
+    symbol = fields.CharField(max_length=20, index=True)  # Removed unique=True for multi-bot
     quantity = fields.FloatField(default=0.0)
     entry_price = fields.FloatField(null=True)
     current_price = fields.FloatField(null=True)
     unrealized_pnl = fields.FloatField(default=0.0)
     updated_at = fields.DatetimeField(auto_now=True)
+    # Phase 5: Bot context fields
+    bot_type = fields.CharField(max_length=50, index=True, default="neat_swing")
+    bot_instance_id = fields.CharField(max_length=100, index=True, default="default")
 
     class Meta:
         table = "positions"
+        unique_together = (("bot_type", "bot_instance_id", "symbol"),)
+        indexes = (("bot_type", "bot_instance_id", "symbol"),)
 
 
 # =============================================================================
@@ -117,10 +132,17 @@ class GenomeModel(Model):
     trained_at = fields.DatetimeField()
     activated_at = fields.DatetimeField(null=True)
     deactivated_at = fields.DatetimeField(null=True)
+    # Phase 5: Bot activation context (null if not bot-specific)
+    active_for_bot_type = fields.CharField(max_length=50, index=True, null=True)
+    active_for_instance_id = fields.CharField(max_length=100, index=True, null=True)
 
     class Meta:
         table = "genomes"
-        indexes = (("symbol", "is_active"), ("symbol", "trained_at"))
+        indexes = (
+            ("symbol", "is_active"),
+            ("symbol", "trained_at"),
+            ("active_for_bot_type", "active_for_instance_id", "is_active"),
+        )
 
 
 # =============================================================================
@@ -144,9 +166,13 @@ class OrderModel(Model):
     genome_id = fields.CharField(max_length=100, null=True)
     created_at = fields.DatetimeField(auto_now_add=True, index=True)
     updated_at = fields.DatetimeField(auto_now=True)
+    # Phase 5: Bot context fields
+    bot_type = fields.CharField(max_length=50, index=True, default="neat_swing")
+    bot_instance_id = fields.CharField(max_length=100, index=True, default="default")
 
     class Meta:
         table = "orders"
+        indexes = (("bot_type", "bot_instance_id"),)
 
 
 # =============================================================================
@@ -168,10 +194,17 @@ class BotDecisionModel(Model):
     candle_close_at = fields.DatetimeField(index=True)
     executed = fields.BooleanField(default=False)
     trade_id = fields.BigIntField(null=True)
+    # Phase 5: Bot context fields
+    bot_type = fields.CharField(max_length=50, index=True, default="neat_swing")
+    bot_instance_id = fields.CharField(max_length=100, index=True, default="default")
 
     class Meta:
         table = "bot_decisions"
-        indexes = (("symbol", "candle_close_at"),)
+        indexes = (
+            ("symbol", "candle_close_at"),
+            ("bot_type", "bot_instance_id"),
+            ("bot_type", "bot_instance_id", "symbol", "candle_close_at"),
+        )
 
 
 # =============================================================================
@@ -254,9 +287,13 @@ class RiskEventModel(Model):
     position_value = fields.FloatField(null=True)
     metric_name = fields.CharField(max_length=50, null=True)
     metric_value = fields.FloatField(null=True)
+    # Phase 5: Bot context fields (null=True for system-level events)
+    bot_type = fields.CharField(max_length=50, index=True, default="neat_swing")
+    bot_instance_id = fields.CharField(max_length=100, index=True, null=True, default="default")
 
     class Meta:
         table = "risk_events"
+        indexes = (("bot_type", "bot_instance_id"),)
 
 
 # =============================================================================
@@ -295,3 +332,46 @@ class SystemConfigModel(Model):
 
     class Meta:
         table = "system_config"
+
+
+# =============================================================================
+# Bot Instance Model (Phase 5)
+# =============================================================================
+
+
+class BotInstanceModel(Model):
+    """Bot instance registry for multi-bot architecture."""
+
+    id = fields.BigIntField(pk=True)
+    bot_type = fields.CharField(max_length=50, index=True)
+    instance_id = fields.CharField(max_length=100, unique=True)
+    symbols = fields.JSONField()
+    mode = fields.CharField(max_length=20)
+    status = fields.CharEnumField(BotStatus, default=BotStatus.STOPPED)
+    config = fields.JSONField(null=True)
+    last_seen_at = fields.DatetimeField(null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = "bot_instances"
+        indexes = (("bot_type", "status"),)
+
+
+# =============================================================================
+# Bot State Model (Phase 5)
+# =============================================================================
+
+
+class BotStateModel(Model):
+    """Bot state persistence for crash recovery."""
+
+    id = fields.BigIntField(pk=True)
+    bot_type = fields.CharField(max_length=50, index=True)
+    bot_instance_id = fields.CharField(max_length=100, index=True)
+    state_json = fields.JSONField()
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "bot_states"
+        indexes = (("bot_type", "bot_instance_id"),)

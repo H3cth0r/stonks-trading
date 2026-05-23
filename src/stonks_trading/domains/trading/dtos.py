@@ -251,3 +251,54 @@ class ValidationErrorResponse(BaseResponse):
     success: bool = False
     error_code: str = "VALIDATION_ERROR"
     errors: list[ValidationError] = Field(default_factory=list)
+
+
+# =============================================================================
+# Bot DTOs (Phase 5)
+# =============================================================================
+
+
+class BotRegisterRequest(BaseModel):
+    """Request to register a new bot instance."""
+
+    bot_type: str = Field(..., min_length=1, max_length=50)
+    instance_id: str = Field(..., min_length=1, max_length=100)
+    symbols: list[str] = Field(default_factory=list)
+    mode: str = Field(default="dry_run", pattern="^(backtest|dry_run|live)$")
+    config: dict | None = None
+
+
+class BotInstanceResponse(BaseResponse):
+    """API response DTO for bot instance."""
+
+    id: int
+    bot_type: str
+    instance_id: str
+    symbols: list[str]
+    mode: str
+    status: str
+    created_at: datetime
+    last_seen_at: datetime | None = None
+
+
+class BotStateResponse(BaseResponse):
+    """API response DTO for bot state."""
+
+    bot_type: str
+    instance_id: str
+    status: str
+    state: dict
+
+
+class BotListResponse(BaseResponse):
+    """List of bot instances response."""
+
+    bots: list[BotInstanceResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class BotInstanceListResponse(BaseResponse):
+    """List of bot instances for a specific type."""
+
+    instances: list[BotInstanceResponse] = Field(default_factory=list)
+    total: int = 0
