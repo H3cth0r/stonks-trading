@@ -4,6 +4,7 @@ API layer - NOT imported by the bot container.
 These routes provide HTTP access to training domain functionality.
 """
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
@@ -17,17 +18,28 @@ from stonks_trading.domains.training.dtos import (
     RetrainingJobRequest,
     RetrainingJobResponse,
     RetrainingSummaryResponse,
+    SchedulerJobListResponse,
+    SchedulerJobRequest,
+    SchedulerJobResponse,
     TrainingProgressResponse,
     TrainingRunListResponse,
     TrainingRunRequest,
     TrainingRunResponse,
+    TriggerRetrainingRequest,
+    TriggerRetrainingResponse,
 )
 from stonks_trading.domains.training.mappers import (
     GenerationMetricMapper,
     GenomeComparisonMapper,
     RetrainingJobMapper,
+    SchedulerJobMapper,
     TrainingProgressMapper,
     TrainingRunMapper,
+    TriggerRetrainingMapper,
+)
+from stonks_trading.domains.training.scheduler_integration import (
+    ScheduledJobConfig,
+    TrainingScheduler,
 )
 from stonks_trading.domains.training.services import (
     CheckpointManager,
@@ -306,3 +318,157 @@ async def cleanup_checkpoints_endpoint(
         retained_count=result["retained_count"],
         retained_checkpoints=result.get("retained_checkpoints", []),
     )
+
+
+# =============================================================================
+# Scheduler Routes
+# =============================================================================
+
+# Global scheduler instance (managed by app lifecycle)
+_training_scheduler: TrainingScheduler | None = None
+
+
+def get_training_scheduler() -> TrainingScheduler:
+    """Get or create the global training scheduler."""
+    global _training_scheduler
+    if _training_scheduler is None:
+        _training_scheduler = TrainingScheduler()
+    return _training_scheduler
+
+
+@router.post(
+    "/scheduler/jobs",
+    response_model=SchedulerJobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def schedule_retraining_job_endpoint(
+    request: SchedulerJobRequest,
+) -> SchedulerJobResponse:
+    """Schedule daily retraining for a bot context.
+
+    Creates a scheduled job that runs daily at 00:00 UTC
+    to retrain genomes for the specified symbols.
+    """
+    scheduler = get_training_scheduler()
+    scheduler.start()
+
+    config = ScheduledJobConfig(
+        bot_context=BotContext(
+            bot_type=request.bot_type,
+            instance_id=request.bot_instance_id,
+        ),
+        symbols=request.symbols,
+        hour=request.hour,
+        minute=request.minute,
+    )
+
+    job_id = scheduler.schedule_daily_retrain(config)
+
+    return SchedulerJobResponse(
+        job_id=job_id,
+        bot_type=request.bot_type,
+        instance_id=request.bot_instance_id,
+        symbols=request.symbols,
+        schedule=f"{request.hour:02d}:{request.minute:02d} UTC",
+        status="scheduled",
+    )
+
+
+@router.get(
+    "/scheduler/jobs",
+    response_model=SchedulerJobListResponse,
+)
+async def list_scheduler_jobs_endpoint() -> SchedulerJobListResponse:
+    """List all scheduled retraining jobs."""
+    scheduler = get_training_scheduler()
+    jobs = scheduler.get_scheduled_jobs()
+    return SchedulerJobMapper.to_list_response(jobs)
+
+
+@router.delete(
+    "/scheduler/jobs/{job_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_scheduler_job_endpoint(
+    job_id: str = Path(..., min_length=1),
+) -> None:
+    """Remove a scheduled retraining job."""
+    scheduler = get_training_scheduler()
+    removed = scheduler.remove_job(job_id)
+
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found",
+        )
+
+
+@router.post(
+    "/scheduler/trigger",
+    response_model=TriggerRetrainingResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def trigger_retraining_endpoint(
+    request: TriggerRetrainingRequest,
+) -> TriggerRetrainingResponse:
+    """Trigger immediate retraining for a bot context.
+
+    This runs the retraining job immediately, outside of the schedule.
+    Useful for testing or manual retraining.
+    """
+    scheduler = get_training_scheduler()
+    scheduler.start()
+
+    bot_context = BotContext(
+        bot_type=request.bot_type,
+        instance_id=request.bot_instance_id,
+    )
+
+    try:
+        results = await scheduler.trigger_retraining_now(
+            bot_context=bot_context,
+            symbols=request.symbols,
+        )
+
+        job_id = (
+            f"manual_{request.bot_type}_{request.bot_instance_id}_{datetime.utcnow().timestamp()}"
+        )
+
+        return TriggerRetrainingMapper.to_response(
+            job_id=job_id,
+            results=results,
+            completed_at=datetime.utcnow(),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Retraining failed: {str(e)}",
+        ) from None
+
+
+@router.post(
+    "/scheduler/start",
+    status_code=status.HTTP_200_OK,
+)
+async def start_scheduler_endpoint() -> dict[str, str]:
+    """Start the training scheduler.
+
+    Must be called before scheduled jobs will run.
+    """
+    scheduler = get_training_scheduler()
+    scheduler.start()
+    return {"status": "scheduler_started"}
+
+
+@router.post(
+    "/scheduler/stop",
+    status_code=status.HTTP_200_OK,
+)
+async def stop_scheduler_endpoint() -> dict[str, str]:
+    """Stop the training scheduler.
+
+    Stops all scheduled jobs from running.
+    """
+    scheduler = get_training_scheduler()
+    scheduler.stop()
+    return {"status": "scheduler_stopped"}

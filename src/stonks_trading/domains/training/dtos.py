@@ -139,3 +139,47 @@ class CheckpointCleanupResponse(BaseResponse):
     deleted_count: int
     retained_count: int
     retained_checkpoints: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SchedulerJobRequest(BaseModel):
+    """Request to schedule a daily retraining job."""
+
+    bot_type: str = Field(..., min_length=1, max_length=50)
+    bot_instance_id: str = Field(..., min_length=1, max_length=100)
+    symbols: list[str] = Field(default_factory=list)
+    hour: int = Field(default=0, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+
+
+class SchedulerJobResponse(BaseResponse):
+    """Scheduled job response."""
+
+    job_id: str
+    bot_type: str
+    instance_id: str
+    symbols: list[str]
+    schedule: str
+    status: str
+
+
+class SchedulerJobListResponse(BaseResponse):
+    """List of scheduled jobs."""
+
+    jobs: list[SchedulerJobResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class TriggerRetrainingRequest(BaseModel):
+    """Request to trigger immediate retraining."""
+
+    bot_type: str = Field(..., min_length=1, max_length=50)
+    bot_instance_id: str = Field(..., min_length=1, max_length=100)
+    symbols: list[str] = Field(default_factory=list)
+
+
+class TriggerRetrainingResponse(BaseResponse):
+    """Immediate retraining response."""
+
+    job_id: str
+    results: list[dict[str, Any]] = Field(default_factory=list)
+    completed_at: datetime
