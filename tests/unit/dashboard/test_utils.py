@@ -12,7 +12,6 @@ from stonks_trading.presentation.dashboard.utils import (
     APIClient,
     API_BASE,
     fetch_sync,
-    get_api_client,
     post_sync,
 )
 
@@ -90,77 +89,55 @@ class TestAPIClient:
 class TestFetchSync:
     """Test fetch_sync function."""
 
-    @patch("stonks_trading.presentation.dashboard.utils.get_api_client")
     @patch("stonks_trading.presentation.dashboard.utils.st")
-    def test_fetch_sync_success(self, mock_st: MagicMock, mock_get_client: MagicMock) -> None:
+    def test_fetch_sync_success(self, mock_st: MagicMock) -> None:
         """Test successful synchronous fetch."""
-        mock_client = MagicMock()
-        mock_client.get = AsyncMock(return_value={"bots": []})
-        mock_get_client.return_value = mock_client
+        with patch.object(
+            APIClient, "get", new_callable=lambda: AsyncMock(return_value={"bots": []})
+        ):
+            result = fetch_sync("/api/v1/bots")
 
-        result = fetch_sync("/api/v1/bots")
+            assert result == {"bots": []}
 
-        assert result == {"bots": []}
-        mock_client.get.assert_called_once()
-
-    @patch("stonks_trading.presentation.dashboard.utils.get_api_client")
     @patch("stonks_trading.presentation.dashboard.utils.st")
-    def test_fetch_sync_error(self, mock_st: MagicMock, mock_get_client: MagicMock) -> None:
+    def test_fetch_sync_error(self, mock_st: MagicMock) -> None:
         """Test fetch_sync handles errors gracefully."""
-        mock_client = MagicMock()
-        mock_client.get = AsyncMock(side_effect=httpx.HTTPStatusError(
-            "404 Not Found",
-            request=MagicMock(),
-            response=MagicMock()
-        ))
-        mock_get_client.return_value = mock_client
+        with patch.object(
+            APIClient,
+            "get",
+            new_callable=lambda: AsyncMock(
+                side_effect=httpx.HTTPStatusError(
+                    "404 Not Found", request=MagicMock(), response=MagicMock()
+                )
+            ),
+        ):
+            result = fetch_sync("/api/v1/invalid")
 
-        result = fetch_sync("/api/v1/invalid")
-
-        assert result == {}
-        mock_st.error.assert_called_once()
+            assert result == {}
+            mock_st.error.assert_called_once()
 
 
 class TestPostSync:
     """Test post_sync function."""
 
-    @patch("stonks_trading.presentation.dashboard.utils.get_api_client")
     @patch("stonks_trading.presentation.dashboard.utils.st")
-    def test_post_sync_success(self, mock_st: MagicMock, mock_get_client: MagicMock) -> None:
+    def test_post_sync_success(self, mock_st: MagicMock) -> None:
         """Test successful synchronous POST."""
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(return_value={"id": 1})
-        mock_get_client.return_value = mock_client
+        with patch.object(
+            APIClient, "post", new_callable=lambda: AsyncMock(return_value={"id": 1})
+        ):
+            data = {"name": "test"}
+            result = post_sync("/api/v1/test", data=data)
 
-        data = {"name": "test"}
-        result = post_sync("/api/v1/test", data=data)
+            assert result == {"id": 1}
 
-        assert result == {"id": 1}
-        mock_client.post.assert_called_once()
-
-    @patch("stonks_trading.presentation.dashboard.utils.get_api_client")
     @patch("stonks_trading.presentation.dashboard.utils.st")
-    def test_post_sync_error(self, mock_st: MagicMock, mock_get_client: MagicMock) -> None:
+    def test_post_sync_error(self, mock_st: MagicMock) -> None:
         """Test post_sync handles errors gracefully."""
-        mock_client = MagicMock()
-        mock_client.post = AsyncMock(side_effect=Exception("Connection error"))
-        mock_get_client.return_value = mock_client
+        with patch.object(
+            APIClient, "post", new_callable=lambda: AsyncMock(side_effect=Exception("Connection error"))
+        ):
+            result = post_sync("/api/v1/test")
 
-        result = post_sync("/api/v1/test")
-
-        assert result == {}
-        mock_st.error.assert_called_once()
-
-
-class TestGetApiClient:
-    """Test get_api_client function."""
-
-    @patch("stonks_trading.presentation.dashboard.utils.st")
-    def test_get_api_client_returns_cached_instance(self, mock_st: MagicMock) -> None:
-        """Test that get_api_client returns cached instance."""
-        with patch.object(mock_st, "cache_resource", lambda f: f):
-            client1 = get_api_client()
-            client2 = get_api_client()
-
-            assert isinstance(client1, APIClient)
-            assert isinstance(client2, APIClient)
+            assert result == {}
+            mock_st.error.assert_called_once()
