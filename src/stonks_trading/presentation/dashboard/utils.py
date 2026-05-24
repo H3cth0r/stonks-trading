@@ -68,7 +68,7 @@ class APIClient:
         await self.client.aclose()
 
 
-@st.cache_resource  # type: ignore
+@st.cache_resource
 def get_api_client() -> APIClient:
     """Get cached API client instance.
 

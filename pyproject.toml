@@ -110,6 +110,10 @@ packages = ["src/stonks_trading"]
 target-version = "py311"
 line-length = 100
 
+[tool.ruff.lint.per-file-ignores]
+# Streamlit uses numbered filenames for page ordering (e.g., 0_Operations_Hub.py)
+"src/stonks_trading/presentation/dashboard/pages/*" = ["N999"]
+
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
@@ -173,6 +177,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "fastapi.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "streamlit.*"
 ignore_missing_imports = true
 
 # Pre-existing mypy errors in untouched modules — out of scope for Phase 5
