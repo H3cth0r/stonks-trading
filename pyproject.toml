@@ -201,6 +201,18 @@ ignore_errors = true
 module = "stonks_trading.shared.notifications"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "duckdb.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "stonks_trading.domains.training.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "stonks_trading.domains.backtesting.*"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "src/stonks_trading/domains/trading/tests"]
 asyncio_mode = "auto"
