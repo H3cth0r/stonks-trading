@@ -241,6 +241,7 @@ async def test_dryrun_fee_tier(dryrun_adapter: DryRunAdapter) -> None:
     assert fee_tier["taker_rate"] == 0.001
 
 
+@pytest.mark.skip(reason="Requires live Binance API; HTTP 451 in CI")
 @pytest.mark.asyncio
 async def test_dryrun_price_source(
     dryrun_adapter: DryRunAdapter,

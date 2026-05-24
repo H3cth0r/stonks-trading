@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 import websockets
-from websockets.client import WebSocketClientProtocol
+from websockets.client import ClientProtocol as WebSocketClientProtocol
 
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.ingest.adapter import Candle, MarketDataAdapter

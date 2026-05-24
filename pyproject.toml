@@ -249,3 +249,7 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = "stonks_trading.domains.trading.adapters"
 ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "stonks_trading.shared.ingest.binance"
+ignore_errors = true

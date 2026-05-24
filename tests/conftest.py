@@ -12,10 +12,9 @@ from stonks_trading.domains.trading.entities import Position, Trade
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.services import (
     FeeCalculator,
-    InstrumentMapper,
     RiskChecker,
 )
-from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.domains.trading.value_objects import InstrumentMapper, Money, Symbol
 
 # Initialize Faker
 fake = Faker()

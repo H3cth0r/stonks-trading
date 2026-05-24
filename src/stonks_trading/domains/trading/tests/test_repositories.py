@@ -266,6 +266,7 @@ class TestGenomeRepository:
             )
         )
 
+        assert genome.id is not None
         result = await activate_genome(genome.id)
 
         assert result is True

@@ -22,8 +22,7 @@ import httpx
 
 from stonks_trading.domains.trading.entities import Balance, OrderResult
 from stonks_trading.domains.trading.enums import Side
-from stonks_trading.domains.trading.services import InstrumentMapper
-from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.domains.trading.value_objects import InstrumentMapper, Money, Symbol
 from stonks_trading.shared.config import settings
 
 

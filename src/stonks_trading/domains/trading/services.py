@@ -7,17 +7,13 @@ They operate on entities and value objects.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
+from stonks_trading.domains.trading.adapters import IExchangeAdapter
 from stonks_trading.domains.trading.entities import Position, RiskCheckResult
-
-if TYPE_CHECKING:
-    from stonks_trading.domains.trading.adapters import IExchangeAdapter
 from stonks_trading.domains.trading.enums import RiskLevel, Side
 from stonks_trading.domains.trading.value_objects import (
     FeeTier,
     Money,
-    Symbol,
 )
 
 
@@ -164,99 +160,6 @@ class RiskChecker:
     ) -> bool:
         """Check if current value is within notification window (80% of threshold)."""
         return current_value >= threshold * self.notification_threshold
-
-
-class InstrumentMapper:
-    """Maps canonical symbols to venue-specific symbols.
-
-    Provides consistent symbol handling across different exchanges.
-    """
-
-    # Default mappings for supported venues
-    DEFAULT_MAPPINGS: dict[str, dict[str, str]] = {
-        "binance": {
-            "BTC_USD": "BTCUSDT",
-            "ETH_USD": "ETHUSDT",
-            "XRP_USD": "XRPUSDT",
-            "SOL_USD": "SOLUSDT",
-            "ADA_USD": "ADAUSDT",
-        },
-        "bitso": {
-            "BTC_USD": "btc_mxn",
-            "ETH_USD": "eth_mxn",
-            "XRP_USD": "xrp_mxn",
-        },
-        "kraken": {
-            "BTC_USD": "XXBTZUSD",
-            "ETH_USD": "XETHZUSD",
-            "XRP_USD": "XXRPZUSD",
-        },
-    }
-
-    def __init__(self, mappings: dict[str, dict[str, str]] | None = None):
-        """Initialize with optional custom mappings.
-
-        Args:
-            mappings: Venue-specific symbol mappings
-        """
-        self.mappings = mappings or self.DEFAULT_MAPPINGS
-
-    def to_venue_symbol(self, canonical: Symbol, venue: str) -> Symbol:
-        """Convert canonical symbol to venue-specific symbol.
-
-        Args:
-            canonical: Canonical symbol (e.g., BTC_USD)
-            venue: Target venue (binance, bitso, kraken)
-
-        Returns:
-            Venue-specific symbol
-        """
-        venue = venue.lower()
-        canonical_str = canonical.value.upper()
-
-        # Handle symbols that are already in venue format
-        if venue == "binance" and canonical_str.endswith("USDT"):
-            return canonical
-
-        if venue in self.mappings:
-            venue_sym = self.mappings[venue].get(canonical_str, canonical_str.lower())
-            return Symbol(value=venue_sym)
-
-        return canonical
-
-    def to_canonical(self, venue_symbol: Symbol, venue: str) -> Symbol:
-        """Convert venue symbol to canonical symbol.
-
-        Args:
-            venue_symbol: Venue-specific symbol
-            venue: Source venue
-
-        Returns:
-            Canonical symbol
-        """
-        venue = venue.lower()
-        venue_str = venue_symbol.value.upper()
-
-        # Reverse lookup
-        if venue in self.mappings:
-            for canonical, venue_sym in self.mappings[venue].items():
-                if venue_sym.upper() == venue_str:
-                    return Symbol(value=canonical)
-
-        # If no mapping found, convert to canonical format
-        # e.g., BTCUSDT -> BTC_USD
-        if venue == "binance" and venue_str.endswith("USDT"):
-            base = venue_str[:-4]
-            return Symbol(value=f"{base}_USD")
-
-        return venue_symbol
-
-    def get_supported_symbols(self, venue: str) -> list[Symbol]:
-        """Get list of supported symbols for venue."""
-        venue = venue.lower()
-        if venue not in self.mappings:
-            return []
-        return [Symbol(value=k) for k in self.mappings[venue]]
 
 
 class FeeCalculator:

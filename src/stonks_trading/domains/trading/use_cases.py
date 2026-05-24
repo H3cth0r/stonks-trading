@@ -27,10 +27,9 @@ from stonks_trading.domains.trading.repositories import (
 )
 from stonks_trading.domains.trading.services import (
     FeeCalculator,
-    InstrumentMapper,
     RiskChecker,
 )
-from stonks_trading.domains.trading.value_objects import BotContext, Money, Symbol
+from stonks_trading.domains.trading.value_objects import BotContext, InstrumentMapper, Money, Symbol
 
 
 class ExecuteTradeUseCase:
