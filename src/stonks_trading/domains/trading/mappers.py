@@ -5,27 +5,38 @@ They handle conversion between internal domain representation
 and external API format.
 """
 
+from datetime import datetime
 from typing import Any
 
 from stonks_trading.domains.trading.dtos import (
+    ActivityItemResponse,
     BalanceItem,
     BalanceResponse,
     BotInstanceResponse,
     BotStateResponse,
+    CheckpointResponse,
     GenomeResponse,
     MarketDataResponse,
+    OrderResponse,
     PositionResponse,
     RiskEventResponse,
     TradeResponse,
+    TrainingRunResponse,
+    VenueBalanceItemResponse,
+    VenueBalanceResponse,
 )
 from stonks_trading.domains.trading.entities import (
+    ActivityItem,
     Balance,
     BotInstance,
+    Checkpoint,
     Genome,
     MarketData,
+    Order,
     Position,
     RiskEvent,
     Trade,
+    TrainingRun,
 )
 from stonks_trading.domains.trading.value_objects import Money
 
@@ -224,3 +235,132 @@ class BotStateMapper:
             status=status,
             state=state or {},
         )
+
+
+class ActivityMapper:
+    """Maps between ActivityItem entity and API DTOs."""
+
+    @staticmethod
+    def to_response(entity: ActivityItem) -> ActivityItemResponse:
+        """Convert domain entity to API response DTO."""
+        return ActivityItemResponse(
+            id=entity.id or 0,
+            type=entity.type,
+            timestamp=entity.timestamp,
+            symbol=entity.symbol.value if entity.symbol else None,
+            data=entity.data,
+            bot_type=entity.bot_type,
+            bot_instance_id=entity.bot_instance_id,
+        )
+
+    @staticmethod
+    def to_response_list(entities: list[ActivityItem]) -> list[ActivityItemResponse]:
+        """Convert list of entities to response DTOs."""
+        return [ActivityMapper.to_response(e) for e in entities]
+
+
+class OrderMapper:
+    """Maps between Order entity and API DTOs."""
+
+    @staticmethod
+    def to_response(entity: Order) -> OrderResponse:
+        """Convert domain entity to API response DTO."""
+        return OrderResponse(
+            order_id=entity.client_order_id or entity.venue_order_id or "unknown",
+            symbol=entity.symbol.value if entity.symbol else "",
+            side=entity.side.value if hasattr(entity.side, "value") else str(entity.side),
+            order_type=entity.order_type,
+            status=entity.status,
+            quantity=entity.quantity,
+            filled_quantity=entity.filled_quantity,
+            price=entity.price.amount if entity.price else None,
+            fill_price=entity.avg_fill_price.amount if entity.avg_fill_price else None,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+            bot_type=entity.bot_type,
+            bot_instance_id=entity.bot_instance_id,
+        )
+
+    @staticmethod
+    def to_response_list(entities: list[Order]) -> list[OrderResponse]:
+        """Convert list of entities to response DTOs."""
+        return [OrderMapper.to_response(e) for e in entities]
+
+
+class VenueBalanceMapper:
+    """Maps between Balance entity and Venue API DTOs."""
+
+    @staticmethod
+    def to_item(entity: Balance) -> VenueBalanceItemResponse:
+        """Convert domain entity to venue balance item DTO."""
+        return VenueBalanceItemResponse(
+            asset=entity.asset,
+            free=entity.free,
+            locked=entity.locked,
+            total=entity.total,
+        )
+
+    @staticmethod
+    def to_response(
+        balances: list[Balance],
+        venue: str,
+        synced_at: datetime,
+    ) -> VenueBalanceResponse:
+        """Convert list of balance entities to venue response DTO."""
+        return VenueBalanceResponse(
+            venue=venue,
+            balances=[VenueBalanceMapper.to_item(b) for b in balances],
+            synced_at=synced_at,
+        )
+
+
+class TrainingRunMapper:
+    """Maps between TrainingRun entity and API DTOs."""
+
+    @staticmethod
+    def to_response(entity: TrainingRun) -> TrainingRunResponse:
+        """Convert domain entity to API response DTO."""
+        return TrainingRunResponse(
+            id=entity.id or 0,
+            symbol=entity.symbol.value if entity.symbol else "",
+            status=entity.status,
+            started_at=entity.started_at,
+            finished_at=entity.finished_at,
+            best_fitness=entity.best_fitness,
+            best_validation_roi=entity.best_roi_validation,
+            generations_completed=entity.generations,
+            git_sha=entity.trainer_git_sha or "unknown",
+            config={
+                "model_family": entity.model_family,
+                "episode_steps": entity.episode_steps,
+                "pop_size": entity.pop_size,
+                "fee_rate": entity.fee_rate,
+            },
+            bot_type="neat_swing",  # Default - bot context may be added later
+            bot_instance_id="default",
+        )
+
+    @staticmethod
+    def to_response_list(entities: list[TrainingRun]) -> list[TrainingRunResponse]:
+        """Convert list of entities to response DTOs."""
+        return [TrainingRunMapper.to_response(e) for e in entities]
+
+
+class CheckpointMapper:
+    """Maps between Checkpoint entity and API DTOs."""
+
+    @staticmethod
+    def to_response(entity: Checkpoint) -> CheckpointResponse:
+        """Convert domain entity to API response DTO."""
+        return CheckpointResponse(
+            generation=entity.generation,
+            artifact_uri=entity.artifact_uri,
+            size_bytes=entity.size_bytes,
+            created_at=entity.created_at,
+            fitness=entity.fitness,
+        )
+
+    @staticmethod
+    def to_response_list(entities: list[Checkpoint]) -> list[CheckpointResponse]:
+        """Convert list of entities to response DTOs."""
+        return [CheckpointMapper.to_response(e) for e in entities]

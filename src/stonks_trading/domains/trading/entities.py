@@ -571,3 +571,47 @@ class BotState:
     id: int | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class ActivityItem:
+    """Activity item entity for unified activity timeline.
+
+    Represents any activity in the system (trade, order, risk event, etc.)
+    for dashboard display and audit purposes.
+    """
+
+    type: str  # "trade", "order", "risk_event", "training", "genome_activation"
+    timestamp: datetime
+    id: int | None = None
+    symbol: Symbol | None = None
+    data: dict[str, Any] = field(default_factory=dict)
+    bot_type: str | None = None
+    bot_instance_id: str | None = None
+
+    @property
+    def display_title(self) -> str:
+        """Get display title based on activity type."""
+        titles = {
+            "trade": f"Trade: {self.symbol.value if self.symbol else 'N/A'}",
+            "order": f"Order: {self.symbol.value if self.symbol else 'N/A'}",
+            "risk_event": "Risk Event",
+            "training": "Training Update",
+            "genome_activation": "Genome Activated",
+        }
+        return titles.get(self.type, "Activity")
+
+
+@dataclass
+class Checkpoint:
+    """Training checkpoint entity for generation-level artifacts.
+
+    Represents a saved model checkpoint during training.
+    """
+
+    generation: int
+    artifact_uri: str
+    size_bytes: int
+    created_at: datetime
+    fitness: float | None = None
+    run_id: int | None = None

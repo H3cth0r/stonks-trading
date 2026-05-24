@@ -4,21 +4,32 @@ Use cases orchestrate business logic by calling services and repositories.
 They contain no direct SQL or HTTP calls.
 """
 
+from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
 from stonks_trading.domains.trading.adapters import IExchangeAdapter
 from stonks_trading.domains.trading.entities import (
+    ActivityItem,
     Balance,
     CheckRiskResult,
     EvaluateSignalResult,
     ExecuteTradeResult,
+    Order,
     Position,
     RiskEvent,
     Trade,
+    TrainingRun,
 )
 from stonks_trading.domains.trading.enums import RiskLevel, Side
 from stonks_trading.domains.trading.repositories import (
+    list_orders,
+    list_risk_events,
+    list_risk_events_by_bot,
+    list_trades,
+    list_trades_by_bot,
+    list_training_runs,
+    prune_genomes,
     save_position,
     save_position_with_context,
     save_risk_event,
@@ -729,3 +740,207 @@ class ExecuteBotTradeUseCase:
                 current.reduce_position(trade.quantity)
                 return current if current.quantity > 0 else None
             return None
+
+
+# =============================================================================
+# Phase 6 Use Cases - Dashboard Support
+# =============================================================================
+
+
+class ListActivityUseCase:
+    """Aggregate activity from multiple sources for unified timeline.
+
+    This is BUSINESS LOGIC - it coordinates multiple repository calls
+    and aggregates results into a unified timeline. This belongs in the
+    use case layer, not the repository layer.
+    """
+
+    async def execute(
+        self,
+        bot_context: BotContext | None = None,
+        types: list[str] | None = None,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> tuple[list[ActivityItem], str | None]:
+        """Aggregate activity from trades, risk events, etc.
+
+        Args:
+            bot_context: Optional bot context filter
+            types: Optional list of activity types to include
+            cursor: Optional cursor for pagination (timestamp-based)
+            limit: Maximum number of results
+
+        Returns:
+            Tuple of (activity items, next cursor)
+        """
+        activities: list[ActivityItem] = []
+        cutoff: datetime | None = None
+
+        if cursor:
+            with suppress(ValueError):
+                cutoff = datetime.fromisoformat(cursor)
+
+        # Get trades and convert to activity items
+        if not types or "trade" in types:
+            trades = (
+                await list_trades_by_bot(bot_context, limit=limit)
+                if bot_context
+                else await list_trades(limit=limit)
+            )
+            for trade in trades:
+                if cutoff and trade.created_at >= cutoff:
+                    continue
+                activities.append(
+                    ActivityItem(
+                        id=trade.id or 0,
+                        type="trade",
+                        timestamp=trade.created_at,
+                        symbol=trade.symbol,
+                        data={
+                            "side": trade.side.value,
+                            "quantity": trade.quantity,
+                            "fill_price": trade.fill_price.amount if trade.fill_price else 0.0,
+                            "fee": trade.fee.amount if trade.fee else 0.0,
+                        },
+                        bot_type=trade.bot_type,
+                        bot_instance_id=trade.bot_instance_id,
+                    )
+                )
+
+        # Get risk events and convert to activity items
+        if not types or "risk_event" in types:
+            risk_events = (
+                await list_risk_events_by_bot(bot_context, limit=limit)
+                if bot_context
+                else await list_risk_events(limit=limit)
+            )
+            for event in risk_events:
+                if cutoff and event.created_at >= cutoff:
+                    continue
+                activities.append(
+                    ActivityItem(
+                        id=event.id or 0,
+                        type="risk_event",
+                        timestamp=event.created_at,
+                        symbol=event.symbol,
+                        data={
+                            "event_type": event.event_type,
+                            "severity": event.severity,
+                            "message": event.message,
+                        },
+                        bot_type=event.bot_type,
+                        bot_instance_id=event.bot_instance_id,
+                    )
+                )
+
+        # Sort by timestamp descending and limit
+        activities.sort(key=lambda x: x.timestamp, reverse=True)
+        activities = activities[:limit]
+
+        # Generate next cursor
+        next_cursor = None
+        if activities and len(activities) == limit:
+            next_cursor = activities[-1].timestamp.isoformat()
+
+        return activities, next_cursor
+
+
+class ListOrdersUseCase:
+    """List orders with filtering.
+
+    Thin wrapper around repository - use case allows for future
+    business logic (permissions, transformations) without modifying repository.
+    """
+
+    async def execute(
+        self,
+        bot_context: BotContext | None = None,
+        status: str | None = None,
+        symbol: Symbol | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Order]:
+        """List orders with optional filtering.
+
+        Args:
+            bot_context: Optional bot context filter
+            status: Optional status filter
+            symbol: Optional symbol filter
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of Order entities
+        """
+        return await list_orders(
+            bot_context=bot_context,
+            status=status,
+            symbol=symbol,
+            limit=limit,
+            offset=offset,
+        )
+
+
+class ListTrainingRunsUseCase:
+    """List training runs with filtering."""
+
+    async def execute(
+        self,
+        status: str | None = None,
+        symbol: Symbol | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[TrainingRun]:
+        """List training runs with optional filtering.
+
+        Args:
+            status: Optional status filter
+            symbol: Optional symbol filter
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of TrainingRun entities
+        """
+        return await list_training_runs(
+            status=status,
+            symbol=symbol,
+            limit=limit,
+            offset=offset,
+        )
+
+
+class PruneGenomesUseCase:
+    """Prune old genomes based on retention policy.
+
+    Business logic for genome retention - coordinates pruning operation.
+    """
+
+    async def execute(
+        self,
+        retention_days: int = 30,
+        keep_active: bool = True,
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Execute genome pruning with retention policy.
+
+        Args:
+            retention_days: Number of days to retain genomes
+            keep_active: Whether to keep the currently active genome
+            dry_run: If True, return what would be pruned without deleting
+
+        Returns:
+            Dict with pruned_count, kept_count, pruned_ids
+        """
+        pruned_count, pruned_ids = await prune_genomes(
+            retention_days=retention_days,
+            keep_active=keep_active,
+            dry_run=dry_run,
+        )
+
+        return {
+            "pruned_count": pruned_count,
+            "kept_count": 0,  # Would need additional query to calculate
+            "pruned_ids": pruned_ids,
+            "dry_run": dry_run,
+        }
