@@ -80,6 +80,12 @@ api = [
     "asyncpg>=0.29.0",  # PostgreSQL async driver
 ]
 
+# Dashboard deps for Streamlit presentation layer
+dashboard = [
+    "streamlit>=1.28",
+    "plotly>=5.18.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=8.0.0",
