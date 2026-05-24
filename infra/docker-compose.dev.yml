@@ -3,11 +3,15 @@
 # Provides:
 # - MinIO (S3-compatible storage for local Tigris replacement)
 # - PostgreSQL (for local Neon replacement)
+# - API (FastAPI backend)
+# - Dashboard (Streamlit UI)
 #
 # Usage:
 #   cd infra && docker-compose -f docker-compose.dev.yml up -d
 #   # MinIO console: http://localhost:9001 (minioadmin/minioadmin)
 #   # PostgreSQL: localhost:5432
+#   # API: http://localhost:8000
+#   # Dashboard: http://localhost:8501
 #
 # To stop:
 #   docker-compose -f docker-compose.dev.yml down
@@ -131,6 +135,32 @@ services:
   #   networks:
   #     - stonks-network
   #   command: python -m stonks_trading.shared.ingest.cli ingest --symbols BTC_USD --testnet
+
+  # Dashboard Service (Phase 6D)
+  # Streamlit dashboard for monitoring trading operations
+  # Accessible at: http://localhost:8501
+  dashboard:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.dashboard
+    container_name: stonks-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://api:8000
+    volumes:
+      - ../src:/app/src:ro  # Mount source for development
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - stonks-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   minio_data:

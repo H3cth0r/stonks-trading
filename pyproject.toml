@@ -80,6 +80,12 @@ api = [
     "asyncpg>=0.29.0",  # PostgreSQL async driver
 ]
 
+# Dashboard deps for Streamlit presentation layer
+dashboard = [
+    "streamlit>=1.28",
+    "plotly>=5.18.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=8.0.0",
@@ -91,6 +97,7 @@ dev = [
     "ruff>=0.2.0",
     "types-requests>=2.31.0",
     "pre-commit>=3.6.0",
+    "streamlit>=1.28",  # Required for dashboard tests in CI
 ]
 
 [project.scripts]
@@ -103,6 +110,10 @@ packages = ["src/stonks_trading"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+# Streamlit uses numbered filenames for page ordering (e.g., 0_Operations_Hub.py)
+"src/stonks_trading/presentation/dashboard/pages/*" = ["N999"]
 
 [tool.ruff.lint]
 select = [
@@ -169,6 +180,14 @@ ignore_missing_imports = true
 module = "fastapi.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "streamlit.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "stonks_trading.presentation.dashboard.utils"
+disable_error_code = ["untyped-decorator"]
+
 # Pre-existing mypy errors in untouched modules — out of scope for Phase 5
 [[tool.mypy.overrides]]
 module = "stonks_trading.domains.trading.neat.*"
@@ -198,6 +217,8 @@ branch = true
 omit = [
     "*/bots/neat_swing/feature_engineering.py",
     "*/bots/neat_swing/runner.py",
+    "*/presentation/dashboard/*.py",
+    "*/presentation/dashboard/pages/*.py",
 ]
 
 [tool.coverage.report]

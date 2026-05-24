@@ -13,6 +13,7 @@ from stonks_trading.bots.base.context import BotContext
 from stonks_trading.domains.trading import repositories as repo
 from stonks_trading.domains.trading.adapters import ExchangeAdapterFactory
 from stonks_trading.domains.trading.dtos import (
+    ActivityListResponse,
     BalanceResponse,
     BotInstanceResponse,
     BotListResponse,
@@ -24,8 +25,11 @@ from stonks_trading.domains.trading.dtos import (
     GenomeResponse,
     MarketDataListResponse,
     MarketDataResponse,
+    MarketPriceListResponse,
+    MarketPriceResponse,
     NeatSignalRequest,
     NeatSignalResponse,
+    OrderListResponse,
     PortfolioResponse,
     PositionListResponse,
     PositionResponse,
@@ -36,16 +40,24 @@ from stonks_trading.domains.trading.dtos import (
     TradeCreateRequest,
     TradeListResponse,
     TradeResponse,
+    TrainingRunListResponse,
+    TrainingRunResponse,
+    VenueBalanceItemResponse,
+    VenueBalanceListResponse,
+    VenueBalanceResponse,
 )
 from stonks_trading.domains.trading.entities import Genome, Position
 from stonks_trading.domains.trading.mappers import (
+    ActivityMapper,
     BalanceMapper,
     BotInstanceMapper,
     BotStateMapper,
     GenomeMapper,
+    OrderMapper,
     PositionMapper,
     RiskEventMapper,
     TradeMapper,
+    TrainingRunMapper,
 )
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import (
@@ -53,6 +65,11 @@ from stonks_trading.domains.trading.use_cases import (
     FetchBalancesUseCase,
     GetCandlesUseCase,
     GetMarketDataUseCase,
+    GetMarketPricesUseCase,
+    GetVenueBalancesUseCase,
+    ListActivityUseCase,
+    ListOrdersUseCase,
+    ListTrainingRunsUseCase,
     PlaceOrderUseCase,
 )
 from stonks_trading.domains.trading.value_objects import Money, Symbol
@@ -64,11 +81,17 @@ genomes_router = APIRouter(prefix="/genomes", tags=["genomes"])
 risk_router = APIRouter(prefix="/risk", tags=["risk"])
 market_router = APIRouter(prefix="/market", tags=["market"])
 portfolio_router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+balances_router = APIRouter(prefix="/balances", tags=["balances"])
 signal_router = APIRouter(prefix="/signals", tags=["signals"])
 
 # Bot routers (Phase 5C)
 bot_registry_router = APIRouter(prefix="/bots", tags=["bot-registry"])
 bot_scoped_router = APIRouter(prefix="/bots/{bot_type}/{instance_id}", tags=["bot-scoped"])
+
+# Phase 6 routers
+activity_router = APIRouter(prefix="/activity", tags=["activity"])
+orders_router = APIRouter(prefix="/orders", tags=["orders"])
+training_router = APIRouter(prefix="/training", tags=["training"])
 
 
 # =============================================================================
@@ -439,6 +462,37 @@ async def get_candles(
         await adapter.close()
 
 
+@market_router.get(
+    "/prices",
+    response_model=MarketPriceListResponse,
+)
+async def get_market_prices_endpoint(
+    symbols: str | None = Query(default=None),
+) -> MarketPriceListResponse:
+    """Get current prices for multiple symbols.
+
+    Thin route - delegates to GetMarketPricesUseCase for business logic.
+    """
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        # Parse symbols or use defaults
+        symbol_list = []
+        if symbols:
+            symbol_list = [Symbol(value=s.strip().upper()) for s in symbols.split(",")]
+        else:
+            symbol_list = [Symbol(value="BTC_USDT")]
+
+        # Delegate to use case (business logic)
+        use_case = GetMarketPricesUseCase(adapter)
+        price_dicts = await use_case.execute(symbol_list)
+
+        # Map to response DTOs
+        prices = [MarketPriceResponse(**p) for p in price_dicts]
+        return MarketPriceListResponse(prices=prices)
+    finally:
+        await adapter.close()
+
+
 # =============================================================================
 # Portfolio Routes
 # =============================================================================
@@ -484,6 +538,38 @@ async def get_balance() -> BalanceResponse:
         use_case = FetchBalancesUseCase(adapter)
         balances = await use_case.execute()
         return BalanceMapper.to_response(balances)
+    finally:
+        await adapter.close()
+
+
+@balances_router.get(
+    "",
+    response_model=VenueBalanceListResponse,
+)
+async def get_balances_endpoint() -> VenueBalanceListResponse:
+    """Get all venue balances.
+
+    Thin route - delegates to GetVenueBalancesUseCase for business logic.
+    """
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        # Delegate to use case (business logic)
+        use_case = GetVenueBalancesUseCase(adapter)
+        venue_dicts = await use_case.execute()
+
+        # Map to response DTOs
+        venues = []
+        for v in venue_dicts:
+            items = [VenueBalanceItemResponse(**item) for item in v["balances"]]
+            venues.append(
+                VenueBalanceResponse(
+                    venue=v["venue"],
+                    balances=items,
+                    synced_at=v["synced_at"],
+                )
+            )
+
+        return VenueBalanceListResponse(venues=venues)
     finally:
         await adapter.close()
 
@@ -625,6 +711,117 @@ async def list_bot_positions(
 
 
 # =============================================================================
+# Phase 6 Routes - Activity, Orders, Training
+# =============================================================================
+
+
+@activity_router.get(
+    "",
+    response_model=ActivityListResponse,
+)
+async def list_activity_endpoint(
+    bot_type: str | None = Query(default=None),
+    instance_id: str | None = Query(default=None),
+    types: list[str] | None = Query(default=None),  # noqa: B008
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> ActivityListResponse:
+    """List unified activity timeline (trades, orders, risk events)."""
+    bot_context = None
+    if bot_type and instance_id:
+        bot_context = BotContext(bot_type=bot_type, instance_id=instance_id)
+
+    use_case = ListActivityUseCase()
+    activities, next_cursor = await use_case.execute(
+        bot_context=bot_context,
+        types=types,
+        cursor=cursor,
+        limit=limit,
+    )
+
+    activity_responses = ActivityMapper.to_response_list(activities)
+    return ActivityListResponse(
+        activities=activity_responses,
+        cursor=next_cursor,
+        total=len(activity_responses),
+    )
+
+
+@orders_router.get(
+    "",
+    response_model=OrderListResponse,
+)
+async def list_orders_endpoint(
+    bot_type: str | None = Query(default=None),
+    instance_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> OrderListResponse:
+    """List orders with optional filtering."""
+    bot_context = None
+    if bot_type and instance_id:
+        bot_context = BotContext(bot_type=bot_type, instance_id=instance_id)
+
+    symbol_obj = Symbol(value=symbol.upper()) if symbol else None
+
+    use_case = ListOrdersUseCase()
+    orders = await use_case.execute(
+        bot_context=bot_context,
+        status=status,
+        symbol=symbol_obj,
+        limit=limit,
+        offset=offset,
+    )
+
+    order_responses = OrderMapper.to_response_list(orders)
+    return OrderListResponse(orders=order_responses, total=len(order_responses))
+
+
+@training_router.get(
+    "",
+    response_model=TrainingRunListResponse,
+)
+async def list_training_runs_endpoint(
+    status: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> TrainingRunListResponse:
+    """List training runs with optional filtering."""
+    symbol_obj = Symbol(value=symbol.upper()) if symbol else None
+
+    use_case = ListTrainingRunsUseCase()
+    runs = await use_case.execute(
+        status=status,
+        symbol=symbol_obj,
+        limit=limit,
+        offset=offset,
+    )
+
+    run_responses = TrainingRunMapper.to_response_list(runs)
+    return TrainingRunListResponse(runs=run_responses, total=len(run_responses))
+
+
+@training_router.get(
+    "/{run_id}",
+    response_model=TrainingRunResponse,
+)
+async def get_training_run_endpoint(
+    run_id: int = Path(..., ge=1),
+) -> TrainingRunResponse:
+    """Get a specific training run by ID."""
+    run = await repo.get_training_run(run_id)
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training run {run_id} not found",
+        )
+    return TrainingRunMapper.to_response(run)
+
+
+# =============================================================================
 # Main Router Assembly
 # =============================================================================
 
@@ -639,8 +836,13 @@ def get_trading_router() -> APIRouter:
     router.include_router(risk_router)
     router.include_router(market_router)
     router.include_router(portfolio_router)
+    router.include_router(balances_router)
     router.include_router(signal_router)
     router.include_router(bot_registry_router)
     router.include_router(bot_scoped_router)
+    # Phase 6 routes
+    router.include_router(activity_router)
+    router.include_router(orders_router)
+    router.include_router(training_router)
 
     return router

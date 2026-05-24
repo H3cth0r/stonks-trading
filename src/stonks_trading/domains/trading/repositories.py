@@ -7,7 +7,7 @@ Each repository function operates on a single entity type and performs
 data access only - no business logic.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from stonks_trading.domains.trading.entities import (
@@ -447,6 +447,25 @@ async def list_risk_events(
 ) -> list[RiskEvent]:
     """List risk events with filters."""
     query = RiskEventModel.all()
+    if severity:
+        query = query.filter(severity=severity)
+    if acknowledged is not None:
+        query = query.filter(acknowledged_at__isnull=not acknowledged)
+    models = await query.limit(limit).order_by("-created_at")
+    return [_model_to_risk_event(m) for m in models]
+
+
+async def list_risk_events_by_bot(
+    context: BotContext,
+    severity: str | None = None,
+    acknowledged: bool | None = None,
+    limit: int = 100,
+) -> list[RiskEvent]:
+    """List risk events filtered by bot context."""
+    query = RiskEventModel.filter(
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
+    )
     if severity:
         query = query.filter(severity=severity)
     if acknowledged is not None:
@@ -968,3 +987,127 @@ class BotStateRepository:
             .first()
         )
         return model.state_json if model else None
+
+
+# =============================================================================
+# Order Repository (Phase 6)
+# =============================================================================
+
+
+async def list_orders(
+    bot_context: BotContext | None = None,
+    status: str | None = None,
+    symbol: Symbol | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[Order]:
+    """List orders with optional filtering.
+
+    Pure data access - no business logic. Filtering is query parameter only.
+    """
+    query = OrderModel.all()
+
+    if bot_context:
+        query = query.filter(
+            bot_type=bot_context.bot_type,
+            bot_instance_id=bot_context.instance_id,
+        )
+
+    if status:
+        query = query.filter(status=status)
+
+    if symbol:
+        query = query.filter(symbol=symbol.value)
+
+    models = await query.order_by("-created_at").offset(offset).limit(limit)
+
+    return [_model_to_order(m) for m in models]
+
+
+async def get_order_by_client_id(client_order_id: str) -> Order | None:
+    """Get order by client order ID."""
+    model = await OrderModel.get_or_none(client_order_id=client_order_id)
+    if not model:
+        return None
+    return _model_to_order(model)
+
+
+def _model_to_order(model: OrderModel) -> Order:
+    """Convert OrderModel to Order entity - pure transformation, no logic."""
+    return Order(
+        id=model.id,
+        client_order_id=model.client_order_id,
+        venue_order_id=model.venue_order_id,
+        symbol=Symbol(model.symbol),
+        side=Side(model.side.value) if hasattr(model.side, "value") else Side.BUY,
+        order_type="market",
+        status=model.status,
+        quantity=model.requested_qty,
+        filled_quantity=model.filled_qty,
+        price=None,
+        fill_price=model.avg_fill_price,
+        mode=TradingMode(model.mode.value) if hasattr(model.mode, "value") else TradingMode.DRY_RUN,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+        bot_type=model.bot_type,
+        bot_instance_id=model.bot_instance_id,
+    )
+
+
+# =============================================================================
+# Training Run Repository (Phase 6)
+# =============================================================================
+
+
+async def list_training_runs(
+    status: str | None = None,
+    symbol: Symbol | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[TrainingRun]:
+    """List training runs with optional filtering.
+
+    Pure data access - no business logic.
+    """
+    query = TrainingRunModel.all()
+
+    if status:
+        query = query.filter(status=status)
+
+    if symbol:
+        query = query.filter(symbol=symbol.value)
+
+    models = await query.order_by("-started_at").offset(offset).limit(limit)
+
+    return [_model_to_training_run(m) for m in models]
+
+
+# =============================================================================
+# Genome Repository Extensions (Phase 6)
+# =============================================================================
+
+
+async def prune_genomes(
+    retention_days: int = 30,
+    keep_active: bool = True,
+    dry_run: bool = True,
+) -> tuple[int, list[int]]:
+    """Prune old genomes based on retention policy.
+
+    Pure data access - policy logic is in use case.
+    """
+    cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+
+    query = GenomeModel.filter(created_at__lt=cutoff_date)
+
+    if keep_active:
+        query = query.filter(is_active=False)
+
+    models = await query.all()
+    pruned_ids = [m.id for m in models if m.id is not None]
+
+    if not dry_run:
+        for model in models:
+            await model.delete()
+
+    return len(pruned_ids), pruned_ids
