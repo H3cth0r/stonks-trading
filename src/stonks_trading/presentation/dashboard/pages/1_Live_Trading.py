@@ -17,15 +17,9 @@ st.title("📊 Live Trading")
 bots_data = fetch_sync("/api/v1/bots")
 bot_options = []
 if bots_data and "bots" in bots_data and bots_data["bots"]:
-    bot_options = [
-        f"{b['bot_type']}/{b['instance_id']}"
-        for b in bots_data["bots"]
-    ]
+    bot_options = [f"{b['bot_type']}/{b['instance_id']}" for b in bots_data["bots"]]
 
-selected_bot = st.selectbox(
-    "Select Bot",
-    bot_options if bot_options else ["No bots available"]
-)
+selected_bot = st.selectbox("Select Bot", bot_options if bot_options else ["No bots available"])
 auto_refresh = st.sidebar.checkbox("Auto-refresh (30s)", value=True)
 refresh_interval = st.sidebar.slider("Refresh interval (seconds)", 10, 300, 30)
 
@@ -96,10 +90,7 @@ if selected_bot and selected_bot != "No bots available":
 
     # Recent Trades for selected bot
     st.header("Recent Trades")
-    trades_data = fetch_sync(
-        f"/api/v1/bots/{bot_type}/{instance_id}/trades",
-        {"limit": 20}
-    )
+    trades_data = fetch_sync(f"/api/v1/bots/{bot_type}/{instance_id}/trades", {"limit": 20})
     if trades_data and "trades" in trades_data and trades_data["trades"]:
         trades = trades_data["trades"]
         st.dataframe(trades, use_container_width=True)

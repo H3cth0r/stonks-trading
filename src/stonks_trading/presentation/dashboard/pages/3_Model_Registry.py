@@ -93,6 +93,7 @@ with st.form("import_genome"):
             }
             if config_json:
                 import json
+
                 try:
                     import_data["config"] = json.loads(config_json)
                 except json.JSONDecodeError:

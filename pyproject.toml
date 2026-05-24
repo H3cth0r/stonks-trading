@@ -97,6 +97,7 @@ dev = [
     "ruff>=0.2.0",
     "types-requests>=2.31.0",
     "pre-commit>=3.6.0",
+    "streamlit>=1.28",  # Required for dashboard tests in CI
 ]
 
 [project.scripts]
@@ -182,6 +183,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "streamlit.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "stonks_trading.presentation.dashboard.utils"
+disable_error_code = ["untyped-decorator"]
 
 # Pre-existing mypy errors in untouched modules — out of scope for Phase 5
 [[tool.mypy.overrides]]

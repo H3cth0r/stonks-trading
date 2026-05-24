@@ -40,7 +40,7 @@ if runs_data and "runs" in runs_data and runs_data["runs"]:
         if completed_runs and any(r.get("best_fitness") for r in completed_runs):
             best_fitness = max(
                 (r.get("best_fitness", 0) for r in completed_runs if r.get("best_fitness")),
-                default=0
+                default=0,
             )
             st.metric("Best Fitness Achieved", f"{best_fitness:.4f}")
 else:
@@ -50,7 +50,10 @@ else:
 st.header("Training Run Details")
 if runs_data and "runs" in runs_data and runs_data["runs"]:
     runs = runs_data["runs"]
-    run_options = [f"Run #{r['id']} - {r.get('symbol', 'Unknown')} ({r.get('status', 'unknown')})" for r in runs]
+    run_options = [
+        f"Run #{r['id']} - {r.get('symbol', 'Unknown')} ({r.get('status', 'unknown')})"
+        for r in runs
+    ]
     selected_run = st.selectbox("Select Training Run", run_options)
 
     if selected_run:
@@ -61,29 +64,37 @@ if runs_data and "runs" in runs_data and runs_data["runs"]:
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("Run Information")
-                st.json({
-                    "id": run_details.get("id"),
-                    "symbol": run_details.get("symbol"),
-                    "status": run_details.get("status"),
-                    "started_at": run_details.get("started_at"),
-                    "finished_at": run_details.get("finished_at"),
-                    "bot_type": run_details.get("bot_type"),
-                    "bot_instance_id": run_details.get("bot_instance_id"),
-                })
+                st.json(
+                    {
+                        "id": run_details.get("id"),
+                        "symbol": run_details.get("symbol"),
+                        "status": run_details.get("status"),
+                        "started_at": run_details.get("started_at"),
+                        "finished_at": run_details.get("finished_at"),
+                        "bot_type": run_details.get("bot_type"),
+                        "bot_instance_id": run_details.get("bot_instance_id"),
+                    }
+                )
 
             with col2:
                 st.subheader("Performance Metrics")
-                st.json({
-                    "best_fitness": run_details.get("best_fitness"),
-                    "best_validation_roi": run_details.get("best_validation_roi"),
-                    "generations_completed": run_details.get("generations_completed"),
-                    "git_sha": run_details.get("git_sha"),
-                })
+                st.json(
+                    {
+                        "best_fitness": run_details.get("best_fitness"),
+                        "best_validation_roi": run_details.get("best_validation_roi"),
+                        "generations_completed": run_details.get("generations_completed"),
+                        "git_sha": run_details.get("git_sha"),
+                    }
+                )
 
             # Checkpoints
             st.subheader("Checkpoints")
             checkpoints_data = fetch_sync(f"/api/v1/training/{run_id}/checkpoints")
-            if checkpoints_data and "checkpoints" in checkpoints_data and checkpoints_data["checkpoints"]:
+            if (
+                checkpoints_data
+                and "checkpoints" in checkpoints_data
+                and checkpoints_data["checkpoints"]
+            ):
                 st.dataframe(checkpoints_data["checkpoints"], use_container_width=True)
             else:
                 st.info("No checkpoints available for this run")

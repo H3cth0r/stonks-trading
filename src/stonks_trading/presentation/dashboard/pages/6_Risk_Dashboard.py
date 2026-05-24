@@ -124,12 +124,16 @@ with st.expander("Activate Kill Switch"):
 
     if st.button("ACTIVATE KILL SWITCH", type="primary"):
         if confirmation == "EMERGENCY STOP":
-            result = post_sync("/api/v1/risk/kill-switch", {"reason": "Manual activation from dashboard"})
+            result = post_sync(
+                "/api/v1/risk/kill-switch", {"reason": "Manual activation from dashboard"}
+            )
             if result:
                 st.error("KILL SWITCH ACTIVATED! All trading has been halted.")
                 st.json(result)
             else:
-                st.error("Failed to activate kill switch. Contact system administrator immediately!")
+                st.error(
+                    "Failed to activate kill switch. Contact system administrator immediately!"
+                )
         else:
             st.error("Confirmation text does not match. Kill switch NOT activated.")
 

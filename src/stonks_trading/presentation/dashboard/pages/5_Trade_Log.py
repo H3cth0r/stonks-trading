@@ -45,9 +45,7 @@ if trades_data and "trades" in trades_data and trades_data["trades"]:
     sell_trades = sum(1 for t in trades if t.get("side") == "SELL")
 
     # Calculate P&L if available
-    total_pnl = sum(
-        t.get("realized_pnl", 0) or 0 for t in trades
-    )
+    total_pnl = sum(t.get("realized_pnl", 0) or 0 for t in trades)
 
     with col1:
         st.metric("Total Trades", total_trades)
@@ -68,6 +66,7 @@ if trades_data and "trades" in trades_data and trades_data["trades"]:
 
     if st.sidebar.button("Export to JSON"):
         import json
+
         json_data = json.dumps(trades, indent=2, default=str)
         st.sidebar.download_button(
             label="Download JSON",
