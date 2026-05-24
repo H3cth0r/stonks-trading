@@ -944,3 +944,97 @@ class PruneGenomesUseCase:
             "pruned_ids": pruned_ids,
             "dry_run": dry_run,
         }
+
+
+class GetVenueBalancesUseCase:
+    """Get venue balances from exchange.
+
+    Business logic for fetching and formatting venue balances.
+    Groups balances by venue and adds metadata.
+    """
+
+    def __init__(self, adapter: IExchangeAdapter):
+        self.adapter = adapter
+
+    async def execute(self) -> list[dict[str, Any]]:
+        """Fetch balances and format as venue groups.
+
+        Returns:
+            List of venue balance dicts with venue, balances, synced_at
+        """
+        fetch_use_case = FetchBalancesUseCase(self.adapter)
+        balances = await fetch_use_case.execute()
+
+        # Group by venue (for now using "default" as venue)
+        venue_balances: dict[str, list[dict[str, Any]]] = {}
+        for balance in balances:
+            venue = "default"
+            if venue not in venue_balances:
+                venue_balances[venue] = []
+
+            venue_balances[venue].append(
+                {
+                    "asset": balance.asset,
+                    "free": balance.free,
+                    "locked": balance.locked,
+                    "total": balance.total,
+                }
+            )
+
+        # Format response
+        result = []
+        synced_at = datetime.utcnow()
+        for venue, items in venue_balances.items():
+            result.append(
+                {
+                    "venue": venue,
+                    "balances": items,
+                    "synced_at": synced_at,
+                }
+            )
+
+        return result
+
+
+class GetMarketPricesUseCase:
+    """Get market prices for multiple symbols.
+
+    Business logic for fetching current prices from exchange.
+    """
+
+    def __init__(self, adapter: IExchangeAdapter):
+        self.adapter = adapter
+
+    async def execute(
+        self,
+        symbols: list[Symbol],
+    ) -> list[dict[str, Any]]:
+        """Fetch prices for multiple symbols.
+
+        Args:
+            symbols: List of symbols to fetch prices for
+
+        Returns:
+            List of price dicts with symbol, price, timestamp
+        """
+        prices = []
+        for symbol in symbols:
+            try:
+                price_use_case = GetMarketDataUseCase(self.adapter)
+                price = await price_use_case.execute(symbol)
+
+                prices.append(
+                    {
+                        "symbol": symbol.value,
+                        "price": price.amount,
+                        "bid": None,  # Adapter doesn't provide bid/ask yet
+                        "ask": None,
+                        "volume_24h": None,  # Adapter doesn't provide volume yet
+                        "timestamp": datetime.utcnow(),
+                    }
+                )
+            except Exception:
+                # Skip symbols that fail to fetch
+                continue
+
+        return prices

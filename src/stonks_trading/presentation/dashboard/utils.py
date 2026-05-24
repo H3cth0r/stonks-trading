@@ -68,23 +68,11 @@ class APIClient:
         await self.client.aclose()
 
 
-@st.cache_resource
-def get_api_client() -> APIClient:
-    """Get cached API client instance.
-
-    Uses Streamlit's cache_resource to avoid recreating
-    the client on every rerun.
-
-    Returns:
-        Configured APIClient instance
-    """
-    return APIClient()
-
-
 def fetch_sync(endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Synchronous fetch for Streamlit.
 
     Runs async HTTP request in asyncio event loop.
+    Creates fresh client per request to avoid connection issues.
     Handles errors and returns empty dict on failure.
 
     Args:
@@ -94,9 +82,16 @@ def fetch_sync(endpoint: str, params: dict[str, Any] | None = None) -> dict[str,
     Returns:
         JSON response or empty dict on error
     """
-    client = get_api_client()
+
+    async def _fetch() -> dict[str, Any]:
+        client = APIClient()
+        try:
+            return await client.get(endpoint, params)
+        finally:
+            await client.close()
+
     try:
-        return asyncio.run(client.get(endpoint, params))
+        return asyncio.run(_fetch())
     except Exception as e:
         st.error(f"API Error: {e}")
         return {}
@@ -106,6 +101,7 @@ def post_sync(endpoint: str, data: dict[str, Any] | None = None) -> dict[str, An
     """Synchronous POST for Streamlit.
 
     Runs async HTTP request in asyncio event loop.
+    Creates fresh client per request to avoid connection issues.
     Handles errors and returns empty dict on failure.
 
     Args:
@@ -115,9 +111,16 @@ def post_sync(endpoint: str, data: dict[str, Any] | None = None) -> dict[str, An
     Returns:
         JSON response or empty dict on error
     """
-    client = get_api_client()
+
+    async def _post() -> dict[str, Any]:
+        client = APIClient()
+        try:
+            return await client.post(endpoint, data)
+        finally:
+            await client.close()
+
     try:
-        return asyncio.run(client.post(endpoint, data))
+        return asyncio.run(_post())
     except Exception as e:
         st.error(f"API Error: {e}")
         return {}

@@ -25,6 +25,8 @@ from stonks_trading.domains.trading.dtos import (
     GenomeResponse,
     MarketDataListResponse,
     MarketDataResponse,
+    MarketPriceListResponse,
+    MarketPriceResponse,
     NeatSignalRequest,
     NeatSignalResponse,
     OrderListResponse,
@@ -40,6 +42,9 @@ from stonks_trading.domains.trading.dtos import (
     TradeResponse,
     TrainingRunListResponse,
     TrainingRunResponse,
+    VenueBalanceItemResponse,
+    VenueBalanceListResponse,
+    VenueBalanceResponse,
 )
 from stonks_trading.domains.trading.entities import Genome, Position
 from stonks_trading.domains.trading.mappers import (
@@ -60,6 +65,8 @@ from stonks_trading.domains.trading.use_cases import (
     FetchBalancesUseCase,
     GetCandlesUseCase,
     GetMarketDataUseCase,
+    GetMarketPricesUseCase,
+    GetVenueBalancesUseCase,
     ListActivityUseCase,
     ListOrdersUseCase,
     ListTrainingRunsUseCase,
@@ -74,6 +81,7 @@ genomes_router = APIRouter(prefix="/genomes", tags=["genomes"])
 risk_router = APIRouter(prefix="/risk", tags=["risk"])
 market_router = APIRouter(prefix="/market", tags=["market"])
 portfolio_router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+balances_router = APIRouter(prefix="/balances", tags=["balances"])
 signal_router = APIRouter(prefix="/signals", tags=["signals"])
 
 # Bot routers (Phase 5C)
@@ -454,6 +462,37 @@ async def get_candles(
         await adapter.close()
 
 
+@market_router.get(
+    "/prices",
+    response_model=MarketPriceListResponse,
+)
+async def get_market_prices_endpoint(
+    symbols: str | None = Query(default=None),
+) -> MarketPriceListResponse:
+    """Get current prices for multiple symbols.
+
+    Thin route - delegates to GetMarketPricesUseCase for business logic.
+    """
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        # Parse symbols or use defaults
+        symbol_list = []
+        if symbols:
+            symbol_list = [Symbol(value=s.strip().upper()) for s in symbols.split(",")]
+        else:
+            symbol_list = [Symbol(value="BTC_USDT")]
+
+        # Delegate to use case (business logic)
+        use_case = GetMarketPricesUseCase(adapter)
+        price_dicts = await use_case.execute(symbol_list)
+
+        # Map to response DTOs
+        prices = [MarketPriceResponse(**p) for p in price_dicts]
+        return MarketPriceListResponse(prices=prices)
+    finally:
+        await adapter.close()
+
+
 # =============================================================================
 # Portfolio Routes
 # =============================================================================
@@ -499,6 +538,38 @@ async def get_balance() -> BalanceResponse:
         use_case = FetchBalancesUseCase(adapter)
         balances = await use_case.execute()
         return BalanceMapper.to_response(balances)
+    finally:
+        await adapter.close()
+
+
+@balances_router.get(
+    "",
+    response_model=VenueBalanceListResponse,
+)
+async def get_balances_endpoint() -> VenueBalanceListResponse:
+    """Get all venue balances.
+
+    Thin route - delegates to GetVenueBalancesUseCase for business logic.
+    """
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        # Delegate to use case (business logic)
+        use_case = GetVenueBalancesUseCase(adapter)
+        venue_dicts = await use_case.execute()
+
+        # Map to response DTOs
+        venues = []
+        for v in venue_dicts:
+            items = [VenueBalanceItemResponse(**item) for item in v["balances"]]
+            venues.append(
+                VenueBalanceResponse(
+                    venue=v["venue"],
+                    balances=items,
+                    synced_at=v["synced_at"],
+                )
+            )
+
+        return VenueBalanceListResponse(venues=venues)
     finally:
         await adapter.close()
 
@@ -765,6 +836,7 @@ def get_trading_router() -> APIRouter:
     router.include_router(risk_router)
     router.include_router(market_router)
     router.include_router(portfolio_router)
+    router.include_router(balances_router)
     router.include_router(signal_router)
     router.include_router(bot_registry_router)
     router.include_router(bot_scoped_router)
