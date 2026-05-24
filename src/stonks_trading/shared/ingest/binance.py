@@ -5,13 +5,14 @@ supporting real-time WebSocket streaming and REST API backfill.
 """
 
 import asyncio
+import contextlib
 import json
 from datetime import datetime
 from typing import Any
 
 import httpx
 import websockets
-from websockets.client import WebSocketClientProtocol
+from websockets.client import ClientProtocol as WebSocketClientProtocol
 
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.ingest.adapter import Candle, MarketDataAdapter
@@ -56,7 +57,7 @@ class BinanceAdapter(MarketDataAdapter):
         self._reconnect_attempts = 0
         self._max_reconnect_delay = 60
         self._running = False
-        self._message_task: asyncio.Task | None = None
+        self._message_task: asyncio.Task[Any] | None = None
         self._use_testnet = use_testnet
 
         # Select URLs based on testnet flag
@@ -112,9 +113,7 @@ class BinanceAdapter(MarketDataAdapter):
         # Build stream path
         # Production WebSocket is public and free - works for both mainnet and testnet
         # Testnet WebSocket for klines is often unavailable, so we use production WS
-        streams = "/".join(
-            f"{self._to_venue_symbol(s).lower()}@kline_1m" for s in symbols
-        )
+        streams = "/".join(f"{self._to_venue_symbol(s).lower()}@kline_1m" for s in symbols)
 
         # Always use production WebSocket for market data (klines are public)
         # Testnet is only used for REST API (orders, account)
@@ -155,7 +154,7 @@ class BinanceAdapter(MarketDataAdapter):
                 error=str(e),
                 url=url,
             )
-            raise ConnectionError(f"Failed to connect to Binance WebSocket: {e}")
+            raise ConnectionError(f"Failed to connect to Binance WebSocket: {e}") from e
 
     async def _message_loop(self) -> None:
         """Main WebSocket message loop with auto-reconnect.
@@ -366,10 +365,8 @@ class BinanceAdapter(MarketDataAdapter):
         # Cancel message loop task
         if self._message_task and not self._message_task.done():
             self._message_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._message_task
-            except asyncio.CancelledError:
-                pass
 
         # Close WebSocket
         if self.ws:

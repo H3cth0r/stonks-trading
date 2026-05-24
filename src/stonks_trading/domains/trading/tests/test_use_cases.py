@@ -16,7 +16,6 @@ from stonks_trading.domains.trading.entities import (
 from stonks_trading.domains.trading.enums import RiskLevel, Side
 from stonks_trading.domains.trading.services import (
     FeeCalculator,
-    InstrumentMapper,
     RiskChecker,
 )
 from stonks_trading.domains.trading.use_cases import (
@@ -24,7 +23,7 @@ from stonks_trading.domains.trading.use_cases import (
     ExecuteTradeUseCase,
     MonitorRiskUseCase,
 )
-from stonks_trading.domains.trading.value_objects import Money
+from stonks_trading.domains.trading.value_objects import InstrumentMapper, Money
 from stonks_trading.shared.testing import (
     fake,
     generate_fake_money,

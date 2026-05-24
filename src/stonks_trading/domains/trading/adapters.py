@@ -22,8 +22,8 @@ import httpx
 
 from stonks_trading.domains.trading.entities import Balance, OrderResult
 from stonks_trading.domains.trading.enums import Side
-from stonks_trading.domains.trading.services import InstrumentMapper
-from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.domains.trading.value_objects import InstrumentMapper, Money, Symbol
+from stonks_trading.shared.config import settings
 
 
 class IExchangeAdapter(ABC):
@@ -215,7 +215,7 @@ class BinanceAdapter(IExchangeAdapter):
             return await self._signed_request(method, endpoint, params)
 
         response.raise_for_status()
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def _public_request(
         self,
@@ -226,7 +226,7 @@ class BinanceAdapter(IExchangeAdapter):
         url = f"{self.base_url}{endpoint}"
         response = await self.client.get(url, params=params)
         response.raise_for_status()
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def place_order(
         self,
@@ -347,7 +347,7 @@ class BinanceAdapter(IExchangeAdapter):
         return await self._public_request(
             "/api/v3/trades",
             {"symbol": venue_symbol.value.upper(), "limit": limit},
-        )
+        )  # type: ignore[no-any-return]
 
     async def get_fee_tier(self) -> dict[str, Any]:
         """Get trading fee tier from Binance."""
@@ -672,8 +672,6 @@ class ExchangeAdapterFactory:
         Returns:
             Configured IExchangeAdapter instance.
         """
-        from stonks_trading.shared.config import settings
-
         effective_mode = (mode or settings.mode).lower()
         effective_venue = (venue or effective_mode).lower()
 

@@ -314,18 +314,20 @@ class TigrisClient:
             raise ValueError("Cannot upload empty candle list")
 
         # Convert candles to DataFrame
-        df = pd.DataFrame([
-            {
-                "timestamp": c.timestamp,
-                "open": c.open,
-                "high": c.high,
-                "low": c.low,
-                "close": c.close,
-                "volume": c.volume,
-                "venue": c.venue,
-            }
-            for c in candles
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "timestamp": c.timestamp,
+                    "open": c.open,
+                    "high": c.high,
+                    "low": c.low,
+                    "close": c.close,
+                    "volume": c.volume,
+                    "venue": c.venue,
+                }
+                for c in candles
+            ]
+        )
 
         # Determine partition from timestamp range
         timestamps = [c.timestamp for c in candles]
@@ -365,14 +367,16 @@ class TigrisClient:
                 if len(parts) >= 4 and parts[-1] == "data.parquet":
                     year = int(parts[2].split("=")[1])
                     month = int(parts[3].split("=")[1])
-                    partitions.append({
-                        "key": key,
-                        "symbol": symbol,
-                        "year": year,
-                        "month": month,
-                        "size": obj["Size"],
-                        "last_modified": obj["LastModified"],
-                    })
+                    partitions.append(
+                        {
+                            "key": key,
+                            "symbol": symbol,
+                            "year": year,
+                            "month": month,
+                            "size": obj["Size"],
+                            "last_modified": obj["LastModified"],
+                        }
+                    )
 
             return partitions
 

@@ -5,10 +5,11 @@ providing a consistent interface for WebSocket streaming and REST backfill
 from different exchanges.
 """
 
+import contextlib
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable
 
 from stonks_trading.domains.trading.value_objects import Symbol
 
@@ -100,11 +101,8 @@ class MarketDataAdapter(ABC):
             candle: The normalized candle to emit
         """
         for handler in self._candle_handlers:
-            try:
+            with contextlib.suppress(Exception):
                 handler(candle)
-            except Exception:
-                # Log but don't stop other handlers
-                pass
 
     @abstractmethod
     async def connect(self, symbols: list[Symbol]) -> None:

@@ -7,8 +7,9 @@ as the training features to ensure parity between training and live inference.
 MUST produce identical results to training features (features.py).
 """
 
+from typing import Any
+
 import pandas as pd
-import ta
 
 from stonks_trading.domains.trading.neat.features import engineer_features
 from stonks_trading.shared.ingest.adapter import Candle
@@ -70,7 +71,7 @@ class LiveFeatureComputer:
 
         # Trim old data
         if len(self._1m_data[symbol]) > self._max_candles:
-            self._1m_data[symbol] = self._1m_data[symbol][-self._max_candles:]
+            self._1m_data[symbol] = self._1m_data[symbol][-self._max_candles :]
 
         # Compute features if we have enough data
         # Need at least 200 hours for SMA200 computation
@@ -101,16 +102,18 @@ class LiveFeatureComputer:
         candles = self._1m_data[symbol]
 
         # Build DataFrame matching training format
-        df = pd.DataFrame([
-            {
-                "Open": c.open,
-                "High": c.high,
-                "Low": c.low,
-                "Close": c.close,
-                "Volume": c.volume,
-            }
-            for c in candles
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "Open": c.open,
+                    "High": c.high,
+                    "Low": c.low,
+                    "Close": c.close,
+                    "Volume": c.volume,
+                }
+                for c in candles
+            ]
+        )
 
         # Create datetime index (required for resampling)
         df.index = pd.DatetimeIndex([c.timestamp for c in candles])
@@ -149,22 +152,24 @@ class LiveFeatureComputer:
         if len(candles) < min_candles:
             return None
 
-        df = pd.DataFrame([
-            {
-                "Open": c.open,
-                "High": c.high,
-                "Low": c.low,
-                "Close": c.close,
-                "Volume": c.volume,
-            }
-            for c in candles
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "Open": c.open,
+                    "High": c.high,
+                    "Low": c.low,
+                    "Close": c.close,
+                    "Volume": c.volume,
+                }
+                for c in candles
+            ]
+        )
 
         df.index = pd.DatetimeIndex([c.timestamp for c in candles])
 
         return engineer_features(df)
 
-    def get_stats(self, symbol: str | None = None) -> dict:
+    def get_stats(self, symbol: str | None = None) -> dict[str, Any]:
         """Get statistics about the feature computer.
 
         Args:
@@ -191,10 +196,7 @@ class LiveFeatureComputer:
         return {
             "symbols": list(self._1m_data.keys()),
             "total_candles": sum(len(candles) for candles in self._1m_data.values()),
-            "symbol_stats": {
-                symbol: self.get_stats(symbol)
-                for symbol in self._1m_data.keys()
-            },
+            "symbol_stats": {symbol: self.get_stats(symbol) for symbol in self._1m_data},
         }
 
     def reset(self, symbol: str | None = None) -> None:

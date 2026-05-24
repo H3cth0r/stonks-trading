@@ -9,6 +9,82 @@ from pydantic import BaseModel, Field, field_validator
 from stonks_trading.domains.trading.enums import Side
 
 
+class InstrumentMapper:
+    """Maps canonical symbols to venue-specific symbols.
+
+    Provides consistent symbol handling across different exchanges.
+    """
+
+    # Default mappings for supported venues
+    DEFAULT_MAPPINGS: dict[str, dict[str, str]] = {
+        "binance": {
+            "BTC_USD": "BTCUSDT",
+            "ETH_USD": "ETHUSDT",
+            "XRP_USD": "XRPUSDT",
+            "SOL_USD": "SOLUSDT",
+            "ADA_USD": "ADAUSDT",
+        },
+        "bitso": {
+            "BTC_USD": "btc_mxn",
+            "ETH_USD": "eth_mxn",
+            "XRP_USD": "xrp_mxn",
+        },
+        "kraken": {
+            "BTC_USD": "XXBTZUSD",
+            "ETH_USD": "XETHZUSD",
+            "XRP_USD": "XXRPZUSD",
+        },
+    }
+
+    def __init__(self, mappings: dict[str, dict[str, str]] | None = None):
+        """Initialize with optional custom mappings.
+
+        Args:
+            mappings: Venue-specific symbol mappings
+        """
+        self.mappings = mappings or self.DEFAULT_MAPPINGS
+
+    def to_venue_symbol(self, canonical: "Symbol", venue: str) -> "Symbol":
+        """Convert canonical symbol to venue-specific symbol."""
+        venue = venue.lower()
+        canonical_str = canonical.value.upper()
+
+        # Handle symbols that are already in venue format
+        if venue == "binance" and canonical_str.endswith("USDT"):
+            return canonical
+
+        if venue in self.mappings:
+            venue_sym = self.mappings[venue].get(canonical_str, canonical_str.lower())
+            return Symbol(value=venue_sym)
+
+        return canonical
+
+    def to_canonical(self, venue_symbol: "Symbol", venue: str) -> "Symbol":
+        """Convert venue symbol to canonical symbol."""
+        venue = venue.lower()
+        venue_str = venue_symbol.value.upper()
+
+        # Reverse lookup
+        if venue in self.mappings:
+            for canonical, venue_sym in self.mappings[venue].items():
+                if venue_sym.upper() == venue_str:
+                    return Symbol(value=canonical)
+
+        # If no mapping found, convert to canonical format
+        if venue == "binance" and venue_str.endswith("USDT"):
+            base = venue_str[:-4]
+            return Symbol(value=f"{base}_USD")
+
+        return venue_symbol
+
+    def get_supported_symbols(self, venue: str) -> list["Symbol"]:
+        """Get list of supported symbols for venue."""
+        venue = venue.lower()
+        if venue not in self.mappings:
+            return []
+        return [Symbol(value=k) for k in self.mappings[venue]]
+
+
 class Symbol(BaseModel):
     """Trading symbol value object.
 
@@ -140,3 +216,23 @@ class Decision(BaseModel):
     def is_confident(self, threshold: float = 0.6) -> bool:
         """Check if either probability exceeds threshold."""
         return self.buy_prob > threshold or self.sell_prob > threshold
+
+
+class BotContext(BaseModel):
+    """Bot context value object for multi-bot isolation.
+
+    Immutable identifier for bot instances that separates
+    data and operations between different bots.
+    """
+
+    bot_type: str = Field(..., min_length=1, max_length=50)
+    instance_id: str = Field(..., min_length=1, max_length=100)
+
+    model_config = {"frozen": True}
+
+    def __str__(self) -> str:
+        return f"{self.bot_type}/{self.instance_id}"
+
+    def to_dict(self) -> dict[str, str]:
+        """Convert to dictionary for serialization."""
+        return {"bot_type": self.bot_type, "bot_instance_id": self.instance_id}

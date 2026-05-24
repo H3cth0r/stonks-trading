@@ -53,3 +53,12 @@ class EventType(str, Enum):
     DRAWDOWN_WARNING = "drawdown_warning"
     TRADE_LIMIT = "trade_limit"
     KILL_SWITCH = "kill_switch"
+
+
+class BotStatus(str, Enum):
+    """Bot status enumeration."""
+
+    RUNNING = "running"
+    STOPPED = "stopped"
+    PAUSED = "paused"
+    ERROR = "error"

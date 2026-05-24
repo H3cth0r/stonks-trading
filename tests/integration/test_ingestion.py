@@ -9,7 +9,7 @@ These tests verify the data pipeline components work together correctly:
 
 import os
 import tempfile
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -46,17 +46,19 @@ def sample_candles() -> list[Candle]:
         timestamp = base_time + timedelta(minutes=i)
         price = 50000.0 + (i % 1000) * 0.1  # Slight price drift
 
-        candles.append(Candle(
-            symbol="BTC_USD",
-            venue="test",
-            timestamp=timestamp,
-            open=price,
-            high=price + 50,
-            low=price - 50,
-            close=price + 20,
-            volume=10.0,
-            closed=True,
-        ))
+        candles.append(
+            Candle(
+                symbol="BTC_USD",
+                venue="test",
+                timestamp=timestamp,
+                open=price,
+                high=price + 50,
+                low=price - 50,
+                close=price + 20,
+                volume=10.0,
+                closed=True,
+            )
+        )
 
     return candles
 
@@ -191,10 +193,12 @@ async def test_feature_parity(sample_candles: list[Candle]) -> None:
     assert live_features is not None
 
     # Compute via training function
-    df = pd.DataFrame([
-        {"Open": c.open, "High": c.high, "Low": c.low, "Close": c.close, "Volume": c.volume}
-        for c in sample_candles
-    ])
+    df = pd.DataFrame(
+        [
+            {"Open": c.open, "High": c.high, "Low": c.low, "Close": c.close, "Volume": c.volume}
+            for c in sample_candles
+        ]
+    )
     df.index = pd.DatetimeIndex([c.timestamp for c in sample_candles])
     train_df = engineer_features(df)
     train_features = train_df.iloc[-1]
@@ -282,8 +286,7 @@ async def test_duckdb_stats(duckdb: DuckDBClient) -> None:
 @pytest.mark.asyncio
 async def test_duckdb_get_latest_timestamp(duckdb: DuckDBClient) -> None:
     """Test retrieving latest timestamp."""
-    from datetime import timezone
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Insert candles at different times
     for i in [10, 5, 15, 3]:
@@ -308,17 +311,16 @@ async def test_duckdb_get_latest_timestamp(duckdb: DuckDBClient) -> None:
     expected = now - timedelta(minutes=3)
     # Handle both offset-aware and offset-naive datetimes
     if latest.tzinfo is not None and expected.tzinfo is None:
-        expected = expected.replace(tzinfo=timezone.utc)
+        expected = expected.replace(tzinfo=UTC)
     elif latest.tzinfo is None and expected.tzinfo is not None:
-        latest = latest.replace(tzinfo=timezone.utc)
+        latest = latest.replace(tzinfo=UTC)
     assert abs((latest - expected).total_seconds()) < 1
 
 
 @pytest.mark.asyncio
 async def test_duckdb_get_data_range(duckdb: DuckDBClient) -> None:
     """Test retrieving data in specific time range."""
-    from datetime import timezone
-    base_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    base_time = datetime.now(UTC) - timedelta(hours=1)
 
     # Insert candles across 2 hours
     for i in range(120):  # 2 hours of 1m candles
@@ -348,7 +350,7 @@ async def test_duckdb_get_data_range(duckdb: DuckDBClient) -> None:
         ts = row["timestamp"]
         # Handle both offset-aware and offset-naive datetimes
         if ts.tzinfo is not None and expected_time.tzinfo is None:
-            expected_time = expected_time.replace(tzinfo=timezone.utc)
+            expected_time = expected_time.replace(tzinfo=UTC)
         elif ts.tzinfo is None and expected_time.tzinfo is not None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         assert abs((ts - expected_time).total_seconds()) < 1

@@ -12,10 +12,9 @@ from stonks_trading.domains.trading.entities import Position, Trade
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.services import (
     FeeCalculator,
-    InstrumentMapper,
     RiskChecker,
 )
-from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.domains.trading.value_objects import InstrumentMapper, Money, Symbol
 
 # Initialize Faker
 fake = Faker()
@@ -27,6 +26,7 @@ settings.register_profile("debug", max_examples=10, deadline=None, verbosity=2)
 
 # Load profile from env or use default
 import os
+
 settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 

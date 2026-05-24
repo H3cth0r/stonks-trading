@@ -7,10 +7,14 @@ from tortoise import Tortoise
 
 from stonks_trading.shared.config import settings
 
-# Tortoise ORM configuration
+# Tortoise ORM expects "postgres://" not "postgresql://"
+_DATABASE_URL = settings.database_url
+if _DATABASE_URL.startswith("postgresql://"):
+    _DATABASE_URL = "postgres://" + _DATABASE_URL.removeprefix("postgresql://")
+
 TORTOISE_ORM = {
     "connections": {
-        "default": settings.database_url,
+        "default": _DATABASE_URL,
     },
     "apps": {
         "models": {

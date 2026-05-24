@@ -7,12 +7,17 @@ These routes provide HTTP access to domain functionality.
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
+from stonks_trading.bots.base.context import BotContext
 from stonks_trading.domains.trading import repositories as repo
 from stonks_trading.domains.trading.adapters import ExchangeAdapterFactory
 from stonks_trading.domains.trading.dtos import (
     BalanceResponse,
+    BotInstanceResponse,
+    BotListResponse,
+    BotRegisterRequest,
+    BotStateResponse,
     GenomeActivateRequest,
     GenomeCreateRequest,
     GenomeListResponse,
@@ -35,6 +40,8 @@ from stonks_trading.domains.trading.dtos import (
 from stonks_trading.domains.trading.entities import Genome, Position
 from stonks_trading.domains.trading.mappers import (
     BalanceMapper,
+    BotInstanceMapper,
+    BotStateMapper,
     GenomeMapper,
     PositionMapper,
     RiskEventMapper,
@@ -42,13 +49,13 @@ from stonks_trading.domains.trading.mappers import (
 )
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import (
+    EvaluateSignalUseCase,
     FetchBalancesUseCase,
     GetCandlesUseCase,
     GetMarketDataUseCase,
     PlaceOrderUseCase,
 )
 from stonks_trading.domains.trading.value_objects import Money, Symbol
-from stonks_trading.shared.postgres_models import PositionModel
 
 # Create router
 trades_router = APIRouter(prefix="/trades", tags=["trades"])
@@ -58,6 +65,33 @@ risk_router = APIRouter(prefix="/risk", tags=["risk"])
 market_router = APIRouter(prefix="/market", tags=["market"])
 portfolio_router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 signal_router = APIRouter(prefix="/signals", tags=["signals"])
+
+# Bot routers (Phase 5C)
+bot_registry_router = APIRouter(prefix="/bots", tags=["bot-registry"])
+bot_scoped_router = APIRouter(prefix="/bots/{bot_type}/{instance_id}", tags=["bot-scoped"])
+
+
+# =============================================================================
+# Bot Context Dependency
+# =============================================================================
+
+
+async def get_bot_context(
+    bot_type: str = Path(..., min_length=1, max_length=50),
+    instance_id: str = Path(..., min_length=1, max_length=100),
+) -> BotContext:
+    """FastAPI dependency to validate and extract bot context.
+
+    Validates that the bot instance exists in the registry.
+    Raises 404 if not found.
+    """
+    instance = await repo.BotInstanceRepository.get(bot_type, instance_id)
+    if not instance:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bot {bot_type}/{instance_id} not found",
+        )
+    return BotContext(bot_type=bot_type, instance_id=instance_id)
 
 
 # =============================================================================
@@ -183,25 +217,10 @@ async def get_position(symbol: str) -> PositionResponse:
     return PositionMapper.to_response(position)
 
 
-# In-memory position list helper (until positions repo has list all)
+# Position list helper - delegates to repository
 async def list_all_positions() -> list[Position]:
-    """List all positions - placeholder until DB query is available."""
-    models = await PositionModel.all()
-    return [
-        Position(
-            id=m.id,
-            symbol=Symbol(value=m.symbol),
-            quantity=m.quantity,
-            entry_price=Money(amount=m.entry_price, currency="USD") if m.entry_price else None,
-            current_price=Money(amount=m.current_price, currency="USD")
-            if m.current_price
-            else None,
-            unrealized_pnl=m.unrealized_pnl,
-            created_at=datetime.utcnow(),  # PositionModel tracks updated_at only
-            updated_at=m.updated_at,
-        )
-        for m in models
-    ]
+    """List all positions - delegates to repository."""
+    return await repo.list_positions()
 
 
 # =============================================================================
@@ -484,28 +503,125 @@ async def evaluate_signal(request: NeatSignalRequest) -> NeatSignalResponse:
     This endpoint allows testing NEAT signal evaluation without
     executing actual trades.
     """
-    # Apply NEAT decision logic
-    threshold = 0.6
+    # Delegate to use case for business logic
+    use_case = EvaluateSignalUseCase(
+        risk_checker=RiskChecker(),
+        decision_threshold=0.6,
+    )
 
-    if request.buy_prob > threshold and request.buy_prob > request.sell_prob:
-        return NeatSignalResponse(
-            action="buy",
-            confidence=request.buy_prob,
-            should_trade=True,
-        )
-    elif request.sell_prob > threshold and request.sell_prob > request.buy_prob:
-        return NeatSignalResponse(
-            action="sell",
-            confidence=request.sell_prob,
-            should_trade=True,
-        )
-    else:
-        return NeatSignalResponse(
-            action=None,
-            confidence=max(request.buy_prob, request.sell_prob),
-            should_trade=False,
-            reason="No signal exceeds threshold",
-        )
+    result = use_case.evaluate(
+        buy_prob=request.buy_prob,
+        sell_prob=request.sell_prob,
+        current_position=None,  # Signal evaluation is position-agnostic
+        portfolio_value=Money(amount=request.portfolio_value or 10000.0, currency="USDT"),
+        daily_trade_count=0,
+        minutes_since_last_trade=999,
+    )
+
+    return NeatSignalResponse(
+        action=result.action.value if result.action else None,
+        confidence=result.confidence,
+        should_trade=result.should_trade,
+        reason=result.reason,
+    )
+
+
+# =============================================================================
+# Bot Registry Routes
+# =============================================================================
+
+
+@bot_registry_router.get(
+    "",
+    response_model=BotListResponse,
+)
+async def list_bots() -> BotListResponse:
+    """List all registered bot instances."""
+    bots = await repo.BotInstanceRepository.list_all()
+    bot_responses = BotInstanceMapper.to_response_list(bots)
+    return BotListResponse(bots=bot_responses, total=len(bot_responses))
+
+
+@bot_registry_router.get(
+    "/{bot_type}",
+    response_model=BotListResponse,
+)
+async def list_bot_instances(bot_type: str) -> BotListResponse:
+    """List all instances of a specific bot type."""
+    instances = await repo.BotInstanceRepository.list_by_type(bot_type)
+    instance_responses = BotInstanceMapper.to_response_list(instances)
+    return BotListResponse(bots=instance_responses, total=len(instance_responses))
+
+
+@bot_registry_router.post(
+    "",
+    response_model=BotInstanceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_bot(request: BotRegisterRequest) -> BotInstanceResponse:
+    """Register a new bot instance."""
+    instance = await repo.BotInstanceRepository.register(
+        bot_type=request.bot_type,
+        instance_id=request.instance_id,
+        symbols=request.symbols,
+        mode=request.mode,
+        config=request.config,
+    )
+    return BotInstanceMapper.to_response(instance)
+
+
+# =============================================================================
+# Bot-Scoped Routes
+# =============================================================================
+
+
+@bot_scoped_router.get(
+    "/state",
+    response_model=BotStateResponse,
+)
+async def get_bot_state(
+    context: BotContext = Depends(get_bot_context),  # noqa: B008
+) -> BotStateResponse:
+    """Get current state for a bot instance."""
+    state = await repo.BotStateRepository.load(context)
+    # Get bot status from registry
+    instance = await repo.BotInstanceRepository.get(context.bot_type, context.instance_id)
+    status = instance.status if instance else "unknown"
+    return BotStateMapper.to_response(
+        bot_type=context.bot_type,
+        instance_id=context.instance_id,
+        state=state,
+        status=status,
+    )
+
+
+@bot_scoped_router.get(
+    "/trades",
+    response_model=TradeListResponse,
+)
+async def list_bot_trades(
+    context: BotContext = Depends(get_bot_context),  # noqa: B008
+    symbol: str | None = Query(default=None, min_length=1),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> TradeListResponse:
+    """List trades for a specific bot."""
+    symbol_obj = Symbol(value=symbol.upper()) if symbol else None
+    trades = await repo.list_trades_by_bot(context, symbol=symbol_obj, limit=limit)
+    trade_responses = TradeMapper.to_response_list(trades)
+    return TradeListResponse(trades=trade_responses, total=len(trade_responses))
+
+
+@bot_scoped_router.get(
+    "/positions",
+    response_model=PositionListResponse,
+)
+async def list_bot_positions(
+    context: BotContext = Depends(get_bot_context),  # noqa: B008
+) -> PositionListResponse:
+    """List all positions for a specific bot."""
+    positions = await repo.list_positions_by_bot(context)
+    position_responses = PositionMapper.to_response_list(positions)
+    return PositionListResponse(positions=position_responses)
 
 
 # =============================================================================
@@ -524,5 +640,7 @@ def get_trading_router() -> APIRouter:
     router.include_router(market_router)
     router.include_router(portfolio_router)
     router.include_router(signal_router)
+    router.include_router(bot_registry_router)
+    router.include_router(bot_scoped_router)
 
     return router

@@ -9,7 +9,7 @@ The orchestrator coordinates the data ingestion pipeline:
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from stonks_trading.domains.trading.value_objects import Symbol
@@ -66,7 +66,7 @@ class IngestionOrchestrator:
         self.tigris = tigris
         self.features = feature_computer
         self._last_candle: dict[str, datetime] = {}  # symbol -> last timestamp
-        self._buffer: dict[str, list[Candle]] = {}   # symbol -> monthly buffer
+        self._buffer: dict[str, list[Candle]] = {}  # symbol -> monthly buffer
         self._running = False
         self._gap_threshold = timedelta(minutes=2)
 
@@ -106,9 +106,8 @@ class IngestionOrchestrator:
         Args:
             symbol: Symbol to backfill
         """
-        from datetime import timezone
 
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         start = end - timedelta(hours=24)
 
         # Check what we already have
@@ -116,7 +115,7 @@ class IngestionOrchestrator:
         if latest:
             # Handle timezone-aware vs timezone-naive datetime comparison
             if latest.tzinfo is None:
-                latest = latest.replace(tzinfo=timezone.utc)
+                latest = latest.replace(tzinfo=UTC)
             start = latest + timedelta(minutes=1)
 
         if start >= end:
@@ -243,9 +242,7 @@ class IngestionOrchestrator:
         )
 
         try:
-            candles = await self.adapter.backfill(
-                Symbol(value=symbol), start, end
-            )
+            candles = await self.adapter.backfill(Symbol(value=symbol), start, end)
             for candle in candles:
                 self._process_candle(candle)
 
@@ -326,9 +323,6 @@ class IngestionOrchestrator:
         return {
             "running": self._running,
             "symbols": list(self._last_candle.keys()),
-            "buffer_sizes": {
-                symbol: len(candles)
-                for symbol, candles in self._buffer.items()
-            },
+            "buffer_sizes": {symbol: len(candles) for symbol, candles in self._buffer.items()},
             "feature_stats": self.features.get_stats(),
         }

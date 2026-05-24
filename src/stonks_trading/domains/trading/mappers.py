@@ -5,9 +5,13 @@ They handle conversion between internal domain representation
 and external API format.
 """
 
+from typing import Any
+
 from stonks_trading.domains.trading.dtos import (
     BalanceItem,
     BalanceResponse,
+    BotInstanceResponse,
+    BotStateResponse,
     GenomeResponse,
     MarketDataResponse,
     PositionResponse,
@@ -16,6 +20,7 @@ from stonks_trading.domains.trading.dtos import (
 )
 from stonks_trading.domains.trading.entities import (
     Balance,
+    BotInstance,
     Genome,
     MarketData,
     Position,
@@ -177,3 +182,45 @@ class BalanceMapper:
     def to_response(entities: list[Balance]) -> BalanceResponse:
         """Convert list of balance entities to response DTO."""
         return BalanceResponse(balances=[BalanceMapper.to_item(e) for e in entities])
+
+
+class BotInstanceMapper:
+    """Maps between BotInstance entity and API DTOs."""
+
+    @staticmethod
+    def to_response(entity: BotInstance) -> BotInstanceResponse:
+        """Convert domain entity to API response DTO."""
+        return BotInstanceResponse(
+            id=entity.id or 0,
+            bot_type=entity.bot_type,
+            instance_id=entity.instance_id,
+            symbols=entity.symbols,
+            mode=entity.mode.value if hasattr(entity.mode, "value") else str(entity.mode),
+            status=entity.status,
+            created_at=entity.created_at,
+            last_seen_at=entity.last_seen_at,
+        )
+
+    @staticmethod
+    def to_response_list(entities: list[BotInstance]) -> list[BotInstanceResponse]:
+        """Convert list of entities to response DTOs."""
+        return [BotInstanceMapper.to_response(e) for e in entities]
+
+
+class BotStateMapper:
+    """Maps between BotState entity and API DTOs."""
+
+    @staticmethod
+    def to_response(
+        bot_type: str,
+        instance_id: str,
+        state: dict[str, Any] | None,
+        status: str = "unknown",
+    ) -> BotStateResponse:
+        """Convert domain entity to API response DTO."""
+        return BotStateResponse(
+            bot_type=bot_type,
+            instance_id=instance_id,
+            status=status,
+            state=state or {},
+        )
