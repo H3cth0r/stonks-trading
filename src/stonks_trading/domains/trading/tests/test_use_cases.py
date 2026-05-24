@@ -4,8 +4,11 @@ These tests verify the behavior of use cases:
 - ExecuteTradeUseCase
 - EvaluateSignalUseCase
 - MonitorRiskUseCase
+- GetVenueBalancesUseCase
+- GetMarketPricesUseCase
 """
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -372,3 +375,132 @@ class TestMonitorRiskUseCase:
 
         assert result.status in [RiskLevel.WARNING, RiskLevel.CRITICAL]
         assert any(e.event_type == "trade_limit" for e in result.events)
+
+
+# =============================================================================
+# GetVenueBalancesUseCase Tests
+# =============================================================================
+
+
+class TestGetVenueBalancesUseCase:
+    """Tests for GetVenueBalancesUseCase."""
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_venue_balances(self) -> None:
+        """Use case should return venue balances with correct structure."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from stonks_trading.domains.trading.adapters import IExchangeAdapter
+        from stonks_trading.domains.trading.use_cases import (
+            GetVenueBalancesUseCase,
+        )
+
+        # Create mock adapter
+        mock_adapter = MagicMock(spec=IExchangeAdapter)
+        mock_balance = MagicMock()
+        mock_balance.asset = "USDT"
+        mock_balance.free = 10000.0
+        mock_balance.locked = 0.0
+        mock_balance.total = 10000.0
+        mock_adapter.get_balance = AsyncMock(return_value=[mock_balance])
+
+        use_case = GetVenueBalancesUseCase(mock_adapter)
+        result = await use_case.execute()
+
+        assert isinstance(result, list)
+        assert len(result) > 0
+        assert "venue" in result[0]
+        assert "balances" in result[0]
+        assert "synced_at" in result[0]
+        assert result[0]["venue"] == "default"
+
+    @pytest.mark.asyncio
+    async def test_execute_groups_by_venue(self) -> None:
+        """Use case should group balances by venue."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from stonks_trading.domains.trading.adapters import IExchangeAdapter
+        from stonks_trading.domains.trading.use_cases import (
+            GetVenueBalancesUseCase,
+        )
+
+        # Create mock adapter with multiple balances
+        mock_adapter = MagicMock(spec=IExchangeAdapter)
+        mock_balance1 = MagicMock()
+        mock_balance1.asset = "USDT"
+        mock_balance1.free = 10000.0
+        mock_balance1.locked = 0.0
+        mock_balance1.total = 10000.0
+        mock_balance2 = MagicMock()
+        mock_balance2.asset = "BTC"
+        mock_balance2.free = 0.5
+        mock_balance2.locked = 0.0
+        mock_balance2.total = 0.5
+        mock_adapter.get_balance = AsyncMock(return_value=[mock_balance1, mock_balance2])
+
+        use_case = GetVenueBalancesUseCase(mock_adapter)
+        result = await use_case.execute()
+
+        assert len(result) == 1  # One venue
+        assert len(result[0]["balances"]) == 2  # Two assets
+
+
+# =============================================================================
+# GetMarketPricesUseCase Tests
+# =============================================================================
+
+
+class TestGetMarketPricesUseCase:
+    """Tests for GetMarketPricesUseCase."""
+
+    @pytest.mark.asyncio
+    async def test_execute_returns_prices(self) -> None:
+        """Use case should return prices for symbols."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from stonks_trading.domains.trading.adapters import IExchangeAdapter
+        from stonks_trading.domains.trading.use_cases import (
+            GetMarketPricesUseCase,
+        )
+        from stonks_trading.domains.trading.value_objects import Money, Symbol
+
+        # Create mock adapter
+        mock_adapter = MagicMock(spec=IExchangeAdapter)
+        mock_adapter.get_price = AsyncMock(return_value=Money(amount=50000.0, currency="USDT"))
+
+        use_case = GetMarketPricesUseCase(mock_adapter)
+        symbols = [Symbol(value="BTC_USDT")]
+        result = await use_case.execute(symbols)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["symbol"] == "BTC_USDT"
+        assert result[0]["price"] == 50000.0
+        assert "timestamp" in result[0]
+
+    @pytest.mark.asyncio
+    async def test_execute_skips_failed_symbols(self) -> None:
+        """Use case should skip symbols that fail to fetch."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from stonks_trading.domains.trading.adapters import IExchangeAdapter
+        from stonks_trading.domains.trading.use_cases import (
+            GetMarketPricesUseCase,
+        )
+        from stonks_trading.domains.trading.value_objects import Money, Symbol
+
+        # Create mock adapter that fails for one symbol
+        mock_adapter = MagicMock(spec=IExchangeAdapter)
+        mock_adapter.get_price = AsyncMock(
+            side_effect=[
+                Money(amount=50000.0, currency="USDT"),
+                Exception("Failed"),
+            ]
+        )
+
+        use_case = GetMarketPricesUseCase(mock_adapter)
+        symbols = [Symbol(value="BTC_USDT"), Symbol(value="ETH_USDT")]
+        result = await use_case.execute(symbols)
+
+        assert len(result) == 1  # Only one successful
+        assert result[0]["symbol"] == "BTC_USDT"
