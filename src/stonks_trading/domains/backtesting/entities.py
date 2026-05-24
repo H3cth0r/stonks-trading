@@ -70,3 +70,36 @@ class BacktestConfig:
     def is_dry_run_simulation(self) -> bool:
         """Check if this is a dry run simulation with slippage."""
         return self.mode == BacktestMode.DRY_RUN_SIMULATION
+
+
+@dataclass
+class RunBacktestRequest:
+    """Request to run a backtest."""
+
+    genome_id: int
+    symbol: str
+    start_date: datetime
+    end_date: datetime
+    genome_data: bytes  # Pickled NEAT genome
+    initial_capital: float = 10000.0
+    config: BacktestConfig | None = None
+
+
+@dataclass
+class BacktestMetrics:
+    """Calculated backtest metrics."""
+
+    total_return_pct: float
+    annualized_return_pct: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+    sortino_ratio: float
+    total_trades: int
+    win_rate_pct: float
+    avg_win: float
+    avg_loss: float
+    profit_factor: float
+    total_fees: float
+    buy_hold_return_pct: float
+    alpha: float
+    beta: float

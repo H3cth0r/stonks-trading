@@ -11,45 +11,28 @@ Use case rules (per architecture.md):
 - Business logic only - orchestration and decisions
 """
 
-from dataclasses import dataclass
+import pickle
 from datetime import datetime
 from typing import Any
 
-from stonks_trading.domains.backtesting.entities import BacktestConfig, BacktestResult
+import neat
+import pandas as pd
+
+from stonks_trading.domains.backtesting.entities import (
+    BacktestConfig,
+    BacktestResult,
+    RunBacktestRequest,
+)
+from stonks_trading.domains.backtesting.repositories import (
+    list_backtest_results,
+    save_backtest_result,
+)
 from stonks_trading.domains.backtesting.services import EquityCurveAnalyzer, MetricsCalculator
-
-
-@dataclass
-class RunBacktestRequest:
-    """Request to run a backtest."""
-
-    genome_id: int
-    symbol: str
-    start_date: datetime
-    end_date: datetime
-    genome_data: bytes  # Pickled NEAT genome
-    initial_capital: float = 10000.0
-    config: BacktestConfig | None = None
-
-
-@dataclass
-class BacktestMetrics:
-    """Calculated backtest metrics."""
-
-    total_return_pct: float
-    annualized_return_pct: float
-    max_drawdown_pct: float
-    sharpe_ratio: float
-    sortino_ratio: float
-    total_trades: int
-    win_rate_pct: float
-    avg_win: float
-    avg_loss: float
-    profit_factor: float
-    total_fees: float
-    buy_hold_return_pct: float
-    alpha: float
-    beta: float
+from stonks_trading.domains.trading.neat.config_builder import create_default_config
+from stonks_trading.domains.trading.neat.features import engineer_features
+from stonks_trading.domains.trading.neat.trading_env import TradingEnv
+from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 
 
 class RunBacktestUseCase:
@@ -63,6 +46,15 @@ class RunBacktestUseCase:
     5. Calculate all metrics (via service)
     6. Save results to DuckDB
     """
+
+    COLUMN_MAPPING = {
+        "timestamp": "Datetime",
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "volume": "Volume",
+    }
 
     def __init__(
         self,
@@ -90,7 +82,6 @@ class RunBacktestUseCase:
         Raises:
             ValueError: If validation fails
         """
-        # 1. Validate request
         days = (request.end_date - request.start_date).days
         if days < 7:
             raise ValueError("Backtest requires at least 7 days of data")
@@ -98,35 +89,166 @@ class RunBacktestUseCase:
         if request.initial_capital <= 0:
             raise ValueError("Initial capital must be positive")
 
-        # 2. Load genome (deserialize from bytes)
-        import pickle
+        genome, _ = pickle.loads(request.genome_data)
+        neat_config = create_default_config()
 
-        genome, neat_config = pickle.loads(request.genome_data)
+        db_client = DuckDBClient()
+        db_client.connect()
 
-        # 3. Fetch historical data
-        # TODO: Fetch from DuckDB/Parquet based on symbol and date range
-        # For now, raise NotImplementedError
-        raise NotImplementedError("Data fetching not implemented - need DuckDB integration")
+        try:
+            symbol_vo = Symbol(value=request.symbol)
+            raw_data = db_client.get_data_range(
+                symbol=symbol_vo,
+                start=request.start_date,
+                end=request.end_date,
+            )
+
+            if not raw_data:
+                raise ValueError(f"No data found for {request.symbol} in date range")
+
+            df = self._raw_data_to_dataframe(raw_data)
+            df = self._ensure_features(df)
+
+        finally:
+            db_client.close()
+
+        config = request.config or BacktestConfig(mode="backtest")
+        simulation_results = await self._execute_simulation(
+            genome=genome,
+            config=config,
+            data=df,
+            neat_config=neat_config,
+            initial_capital=request.initial_capital,
+        )
+
+        equity_curve = simulation_results["equity_curve"]
+        metrics = self.metrics_calculator.calculate_all_metrics(
+            equity_curve=equity_curve,
+            trades=simulation_results["trades"],
+            initial_capital=request.initial_capital,
+            market_prices=simulation_results["market_prices"],
+        )
+
+        backtest_result = BacktestResult(
+            genome_id=request.genome_id,
+            symbol=request.symbol,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            mode=config.mode,
+            initial_capital=request.initial_capital,
+            final_equity=equity_curve[-1] if equity_curve else request.initial_capital,
+            total_return_pct=metrics["total_return_pct"],
+            max_drawdown_pct=metrics["max_drawdown_pct"],
+            sharpe_ratio=metrics["sharpe_ratio"],
+            sortino_ratio=metrics["sortino_ratio"],
+            total_trades=len(simulation_results["trades"]),
+            win_rate_pct=metrics["win_rate_pct"],
+            avg_win=metrics["avg_win"],
+            avg_loss=metrics["avg_loss"],
+            profit_factor=metrics["profit_factor"],
+            total_fees=metrics["total_fees"],
+            buy_hold_return_pct=metrics["buy_hold_return_pct"],
+            alpha=metrics["alpha"],
+            beta=metrics["beta"],
+            equity_curve=equity_curve,
+            trades=simulation_results["trades"],
+            created_at=datetime.utcnow(),
+        )
+
+        await save_backtest_result(backtest_result)
+
+        return backtest_result
+
+    def _raw_data_to_dataframe(self, raw_data: list[dict]) -> pd.DataFrame:
+        """Convert raw data to DataFrame."""
+        df = pd.DataFrame(raw_data)
+        df = df.rename(columns=self.COLUMN_MAPPING)
+
+        if "Datetime" in df.columns:
+            df.set_index("Datetime", inplace=True)
+
+        return df
+
+    REQUIRED_FEATURES = ["trend_1h", "rsi_1h", "rsi_15m", "roc", "bb_width"]
+
+    def _ensure_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure required features exist."""
+        if all(feat in df.columns for feat in self.REQUIRED_FEATURES):
+            return df
+
+        return engineer_features(df)
 
     async def _execute_simulation(
         self,
         genome: Any,
         config: BacktestConfig,
-        data: Any,
+        data: pd.DataFrame,
+        neat_config: Any,
+        initial_capital: float,
     ) -> dict[str, Any]:
         """Execute simulation based on mode.
 
         Args:
             genome: NEAT genome
             config: Backtest configuration
-            data: Historical price data
+            data: Historical price data DataFrame
+            neat_config: NEAT configuration
+            initial_capital: Starting capital
 
         Returns:
             Dict with simulation results
         """
-        # This would use the TradingEnv from NEAT modules
-        # Mode determines slippage and latency simulation
-        raise NotImplementedError("Simulation execution not implemented")
+        slippage_bps = 5 if config.mode == "dry_run" else 0
+
+        env = TradingEnv(
+            data=data,
+            fee_rate=config.fee_rate if hasattr(config, "fee_rate") else 0.001,
+            slippage_bps=slippage_bps,
+            mode=config.mode,
+            initial_capital=initial_capital,
+            min_trade_interval=config.min_trade_interval
+            if hasattr(config, "min_trade_interval")
+            else 15,
+            decision_threshold=config.decision_threshold
+            if hasattr(config, "decision_threshold")
+            else 0.6,
+        )
+
+        net = neat.nn.RecurrentNetwork.create(genome, neat_config)
+
+        equity_curve = []
+        env.reset()
+
+        for i in range(len(data)):
+            state = env.get_state(i)
+            action = net.activate(state)
+            equity = env.step(i, tuple(action))
+            equity_curve.append(equity)
+
+        market_prices = data["Close"].values
+
+        trades = [
+            {
+                "step": t.step,
+                "type": t.trade_type,
+                "price": t.price,
+                "timestamp": t.timestamp.isoformat()
+                if hasattr(t.timestamp, "isoformat")
+                else str(t.timestamp),
+                "fee_paid": t.fee_paid,
+                "quantity": t.quantity,
+            }
+            for t in env.trades
+        ]
+
+        return {
+            "equity_curve": equity_curve,
+            "trades": trades,
+            "market_prices": market_prices,
+            "final_equity": equity_curve[-1] if equity_curve else initial_capital,
+            "max_drawdown": env.max_drawdown,
+            "total_trades": len(env.trades),
+        }
 
 
 class CompareBacktestResultsUseCase:
@@ -201,8 +323,6 @@ class GetBacktestHistoryUseCase:
         Returns:
             List of BacktestResult entities
         """
-        from stonks_trading.domains.backtesting.repositories import list_backtest_results
-
         return await list_backtest_results(
             symbol=symbol,
             genome_id=genome_id,

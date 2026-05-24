@@ -14,7 +14,13 @@ from stonks_trading.domains.backtesting.dtos import (
     RunBacktestRequest,
 )
 from stonks_trading.domains.backtesting.mappers import BacktestResultMapper
+from stonks_trading.domains.backtesting.repositories import (
+    delete_backtest_result,
+    get_backtest_result,
+    list_backtest_results,
+)
 from stonks_trading.domains.backtesting.services import MetricsCalculator
+from stonks_trading.domains.trading.repositories import get_genome_by_id
 
 # Create router
 router = APIRouter(prefix="/backtest", tags=["backtesting"])
@@ -51,9 +57,7 @@ async def run_backtest_endpoint(
     )
 
     # Fetch genome data first
-    from stonks_trading.domains.trading.repositories import get_genome
-
-    genome = await get_genome(request.genome_id)
+    genome = await get_genome_by_id(request.genome_id)
     if not genome:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -103,8 +107,6 @@ async def get_backtest_result_endpoint(
     backtest_id: str = Path(..., min_length=1),
 ) -> BacktestResultResponse:
     """Get a specific backtest result by ID."""
-    from stonks_trading.domains.backtesting.repositories import get_backtest_result
-
     result = await get_backtest_result(backtest_id)
     if not result:
         raise HTTPException(
@@ -125,8 +127,6 @@ async def list_backtest_results_endpoint(
     offset: int = Query(default=0, ge=0),
 ) -> BacktestResultListResponse:
     """List backtest results with optional filtering."""
-    from stonks_trading.domains.backtesting.repositories import list_backtest_results
-
     results = await list_backtest_results(
         symbol=symbol.upper() if symbol else None,
         genome_id=genome_id,
@@ -151,8 +151,6 @@ async def compare_backtest_results_endpoint(
     Verifies that dry-run simulation produces worse results than
     pure backtest (due to slippage and latency).
     """
-    from stonks_trading.domains.backtesting.repositories import get_backtest_result
-
     backtest_result = await get_backtest_result(backtest_id)
     dry_run_result = await get_backtest_result(dry_run_id)
 
@@ -181,8 +179,6 @@ async def delete_backtest_result_endpoint(
     backtest_id: str = Path(..., min_length=1),
 ) -> None:
     """Delete a backtest result."""
-    from stonks_trading.domains.backtesting.repositories import delete_backtest_result
-
     deleted = await delete_backtest_result(backtest_id)
     if not deleted:
         raise HTTPException(

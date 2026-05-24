@@ -28,6 +28,7 @@ from stonks_trading.domains.training.dtos import (
     TriggerRetrainingRequest,
     TriggerRetrainingResponse,
 )
+from stonks_trading.domains.training.entities import RetrainingJob
 from stonks_trading.domains.training.mappers import (
     GenerationMetricMapper,
     GenomeComparisonMapper,
@@ -36,6 +37,11 @@ from stonks_trading.domains.training.mappers import (
     TrainingProgressMapper,
     TrainingRunMapper,
     TriggerRetrainingMapper,
+)
+from stonks_trading.domains.training.repositories import (
+    get_training_run,
+    list_generation_metrics,
+    list_training_runs,
 )
 from stonks_trading.domains.training.scheduler_integration import (
     ScheduledJobConfig,
@@ -145,8 +151,6 @@ async def list_training_runs_endpoint(
 
     Thin route - delegates to use case for any business logic.
     """
-    from stonks_trading.domains.training.repositories import list_training_runs
-
     symbol_obj = Symbol(value=symbol.upper()) if symbol else None
 
     runs = await list_training_runs(
@@ -169,8 +173,6 @@ async def get_training_run_endpoint(
     run_id: int = Path(..., ge=1),
 ) -> TrainingRunResponse:
     """Get a specific training run by ID."""
-    from stonks_trading.domains.training.repositories import get_training_run
-
     run = await get_training_run(run_id)
     if not run:
         raise HTTPException(
@@ -207,8 +209,6 @@ async def get_generation_metrics_endpoint(
     run_id: int = Path(..., ge=1),
 ) -> GenerationMetricListResponse:
     """Get generation metrics for a training run."""
-    from stonks_trading.domains.training.repositories import list_generation_metrics
-
     metrics = await list_generation_metrics(run_id)
     metric_responses = GenerationMetricMapper.to_response_list(metrics)
     return GenerationMetricListResponse(metrics=metric_responses, total=len(metric_responses))
@@ -228,8 +228,6 @@ async def schedule_retraining_endpoint(
     request: RetrainingJobRequest,
 ) -> RetrainingJobResponse:
     """Schedule a retraining job for a symbol and bot context."""
-    from stonks_trading.domains.training.entities import RetrainingJob
-
     job = RetrainingJob(
         symbol=request.symbol.upper(),
         bot_context=BotContext(

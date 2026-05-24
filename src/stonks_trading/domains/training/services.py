@@ -16,13 +16,17 @@ Service rules (per architecture.md):
 
 import pickle
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 
 import neat
 import pandas as pd
 
 from stonks_trading.domains.trading.neat.config_builder import create_default_config
+from stonks_trading.domains.trading.neat.features import engineer_features
 from stonks_trading.domains.trading.neat.trainer import NeatTrainer, evaluate_genome_on_data
+from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 
 
 class TrainingExecutor:
@@ -220,6 +224,27 @@ class TrainingDataProvider:
     Business logic (which data, date ranges) in use cases.
     """
 
+    REQUIRED_FEATURES = ["trend_1h", "rsi_1h", "rsi_15m", "roc", "bb_width"]
+    COLUMN_MAPPING = {
+        "timestamp": "Datetime",
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "volume": "Volume",
+    }
+
+    def __init__(
+        self,
+        db_path: str = "data/neat.db",
+    ) -> None:
+        """Initialize training data provider.
+
+        Args:
+            db_path: Path to DuckDB database file
+        """
+        self._db_client = DuckDBClient(db_path=db_path)
+
     async def fetch_training_window(
         self,
         symbol: str,
@@ -234,10 +259,10 @@ class TrainingDataProvider:
         Returns:
             DataFrame with OHLCV data and features
         """
-        # TODO: Implement using DuckDB client
-        # This will fetch from parquet files or DuckDB
-        msg = f"TrainingDataProvider.fetch_training_window not implemented for {symbol}"
-        raise NotImplementedError(msg)
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+
+        return await self._fetch_data(symbol, start_date, end_date, "training")
 
     async def fetch_validation_data(
         self,
@@ -253,9 +278,86 @@ class TrainingDataProvider:
         Returns:
             DataFrame with OHLCV data for validation
         """
-        # TODO: Implement using DuckDB client
-        msg = f"TrainingDataProvider.fetch_validation_data not implemented for {symbol}"
-        raise NotImplementedError(msg)
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+
+        return await self._fetch_data(symbol, start_date, end_date, "validation")
+
+    async def _fetch_data(
+        self,
+        symbol: str,
+        start_date: datetime,
+        end_date: datetime,
+        data_type: str,
+    ) -> pd.DataFrame:
+        """Fetch data from DuckDB for specified range.
+
+        Args:
+            symbol: Trading symbol
+            start_date: Start of date range
+            end_date: End of date range
+            data_type: "training" or "validation" (for error messages)
+
+        Returns:
+            DataFrame with OHLCV data and features
+
+        Raises:
+            ValueError: If no data found
+        """
+        self._db_client.connect()
+
+        try:
+            symbol_vo = Symbol(value=symbol)
+            raw_data = self._db_client.get_data_range(
+                symbol=symbol_vo,
+                start=start_date,
+                end=end_date,
+            )
+
+            if not raw_data:
+                raise ValueError(
+                    f"No {data_type} data found for {symbol} in date range "
+                    f"{start_date} to {end_date}"
+                )
+
+            df = self._to_dataframe(raw_data)
+            return self._ensure_features(df)
+
+        finally:
+            self._db_client.close()
+
+    def _to_dataframe(self, raw_data: list[dict]) -> pd.DataFrame:
+        """Convert raw DuckDB data to DataFrame with proper columns.
+
+        Args:
+            raw_data: List of dictionaries from DuckDB
+
+        Returns:
+            DataFrame with OHLCV and features
+        """
+        df = pd.DataFrame(raw_data)
+        df = df.rename(columns=self.COLUMN_MAPPING)
+
+        if "Datetime" in df.columns:
+            df.set_index("Datetime", inplace=True)
+
+        return df
+
+    def _ensure_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure all required features exist in DataFrame.
+
+        If features are missing, compute them using engineer_features.
+
+        Args:
+            df: DataFrame with OHLCV data
+
+        Returns:
+            DataFrame with all required features
+        """
+        if all(feat in df.columns for feat in self.REQUIRED_FEATURES):
+            return df
+
+        return engineer_features(df)
 
 
 class CheckpointManager:

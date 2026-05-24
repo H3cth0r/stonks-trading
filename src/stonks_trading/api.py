@@ -6,6 +6,7 @@ Future domains register their routers here (e.g. domains.portfolio.routes).
 from fastapi import FastAPI
 from tortoise.contrib.fastapi import register_tortoise
 
+from stonks_trading.domains.backtesting.routes import router as backtest_router
 from stonks_trading.domains.trading.routes import get_trading_router
 from stonks_trading.shared.config import settings
 from stonks_trading.shared.database import TORTOISE_ORM
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
 
     # Domain routers
     app.include_router(get_trading_router(), prefix="/api/v1", tags=["trading"])
+    app.include_router(backtest_router, prefix="/api/v1", tags=["backtesting"])
     # Future: app.include_router(get_portfolio_router(), prefix="/api/v1", tags=["portfolio"])
 
     # Register Tortoise ORM
