@@ -36,7 +36,7 @@ Faker.seed(12345)
 def symbol_strategy() -> st.SearchStrategy[Symbol]:
     """Strategy for generating valid trading symbols."""
     symbols = ["BTC_USD", "ETH_USD", "XRP_USD", "SOL_USD", "ADA_USD", "DOT_USD"]
-    return st.sampled_from([Symbol(s) for s in symbols])
+    return st.sampled_from([Symbol(value=s) for s in symbols])
 
 
 def side_strategy() -> st.SearchStrategy[Side]:

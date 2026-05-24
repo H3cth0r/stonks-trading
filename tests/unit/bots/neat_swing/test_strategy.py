@@ -1,8 +1,5 @@
 """Unit tests for NeatSwingStrategy."""
 
-from unittest.mock import MagicMock
-
-import numpy as np
 import pytest
 
 from stonks_trading.bots.neat_swing.strategy import (
@@ -11,7 +8,6 @@ from stonks_trading.bots.neat_swing.strategy import (
     TRANSACTION_FEE,
     NeatSwingStrategy,
 )
-from stonks_trading.domains.trading.entities import Signal
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.value_objects import Symbol
 
@@ -100,9 +96,7 @@ class TestNeatSwingStrategy:
         }
         position = None
 
-        signal = strategy.generate_signal(
-            symbol, candle, features, position
-        )
+        signal = strategy.generate_signal(symbol, candle, features, position)
         assert signal is None
 
     def test_generate_signal_returns_buy_signal(self) -> None:
@@ -180,7 +174,9 @@ class TestNeatSwingStrategyEdgeCases:
         """Strategy handles single candle gracefully."""
         strategy = NeatSwingStrategy()
         symbol = Symbol(value="BTC_USD")
-        candles = [{"close": 50000.0, "open": 49000.0, "high": 51000.0, "low": 48500.0, "volume": 1.5}]
+        candles = [
+            {"close": 50000.0, "open": 49000.0, "high": 51000.0, "low": 48500.0, "volume": 1.5}
+        ]
 
         features = strategy.compute_features(symbol, candles)
         # Should return dict but some features may be NaN
@@ -201,8 +197,13 @@ class TestNeatSwingStrategyEdgeCases:
         symbol = Symbol(value="BTC_USD")
         # Need 200+ candles for SMA200, 20+ for Bollinger Bands
         candles = [
-            {"close": 50000.0 + i * 10, "open": 49900.0 + i * 10,
-             "high": 50200.0 + i * 10, "low": 49800.0 + i * 10, "volume": 1.5}
+            {
+                "close": 50000.0 + i * 10,
+                "open": 49900.0 + i * 10,
+                "high": 50200.0 + i * 10,
+                "low": 49800.0 + i * 10,
+                "volume": 1.5,
+            }
             for i in range(250)
         ]
 

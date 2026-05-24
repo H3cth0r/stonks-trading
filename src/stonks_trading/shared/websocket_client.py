@@ -80,9 +80,7 @@ class WebSocketClient:
             if self._running:
                 logger.info(f"Reconnecting in {self._reconnect_delay}s...")
                 await asyncio.sleep(self._reconnect_delay)
-                self._reconnect_delay = min(
-                    self._reconnect_delay * 2, self._max_reconnect_delay
-                )
+                self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
 
     async def _connect(self) -> None:
         """Establish WebSocket connection and listen."""

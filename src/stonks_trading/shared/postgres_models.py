@@ -244,7 +244,7 @@ class GenerationMetricModel(Model):
     """Per-generation metrics during training."""
 
     id = fields.BigIntField(pk=True)
-    run = fields.ForeignKeyField("models.TrainingRunModel", related_name="metrics")
+    run = fields.ForeignKeyField("models.TrainingRunModel", related_name="metrics")  # type: ignore[var-annotated]
     generation = fields.IntField()
     best_fitness = fields.FloatField()
     mean_fitness = fields.FloatField()
@@ -327,7 +327,7 @@ class SystemConfigModel(Model):
 
     id = fields.BigIntField(pk=True)
     key = fields.CharField(max_length=100, unique=True)
-    value = fields.JSONField()
+    value = fields.JSONField()  # type: ignore[var-annotated]
     updated_at = fields.DatetimeField(auto_now=True)
 
     class Meta:
@@ -345,10 +345,10 @@ class BotInstanceModel(Model):
     id = fields.BigIntField(pk=True)
     bot_type = fields.CharField(max_length=50, index=True)
     instance_id = fields.CharField(max_length=100, unique=True)
-    symbols = fields.JSONField()
+    symbols = fields.JSONField()  # type: ignore[var-annotated]
     mode = fields.CharField(max_length=20)
     status = fields.CharEnumField(BotStatus, default=BotStatus.STOPPED)
-    config = fields.JSONField(null=True)
+    config = fields.JSONField(null=True)  # type: ignore[var-annotated]
     last_seen_at = fields.DatetimeField(null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
 
@@ -368,7 +368,7 @@ class BotStateModel(Model):
     id = fields.BigIntField(pk=True)
     bot_type = fields.CharField(max_length=50, index=True)
     bot_instance_id = fields.CharField(max_length=100, index=True)
-    state_json = fields.JSONField()
+    state_json = fields.JSONField()  # type: ignore[var-annotated]
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 

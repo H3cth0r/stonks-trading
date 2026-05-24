@@ -64,7 +64,12 @@ class MockAdapter:
         from stonks_trading.domains.trading.entities import Balance
 
         if asset:
-            return Balance(asset=asset, free=self.balances.get(asset, 0), locked=0, total=self.balances.get(asset, 0))
+            return Balance(
+                asset=asset,
+                free=self.balances.get(asset, 0),
+                locked=0,
+                total=self.balances.get(asset, 0),
+            )
         return [Balance(asset=k, free=v, locked=0, total=v) for k, v in self.balances.items()]
 
     async def get_price(self, symbol: Symbol) -> Money:
@@ -230,8 +235,10 @@ class TestMultiBotRegistration:
         bot_b: NeatSwingBot,
     ) -> None:
         """Each bot can update its status without affecting the other."""
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state:
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+        ):
             mock_state.save = AsyncMock()
             mock_repo.update_status = AsyncMock()
 
@@ -526,8 +533,10 @@ class TestMultiBotScenario:
             initial_state=NeatSwingState(),
         )
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state:
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+        ):
             mock_repo.register = AsyncMock()
             mock_state.load = AsyncMock(return_value=saved_state)
             mock_state.save = AsyncMock()
@@ -627,12 +636,14 @@ class TestMultiBotEdgeCases:
         symbol: Symbol,
     ) -> None:
         """Trade execution uses correct bot context."""
-        with patch("stonks_trading.domains.trading.repositories.save_trade_with_context") as mock_save:
+        with patch(
+            "stonks_trading.domains.trading.repositories.save_trade_with_context"
+        ) as mock_save:
             mock_save.return_value = MagicMock()
 
             # Simulate trade execution through use case
-            from stonks_trading.domains.trading.repositories import save_trade_with_context
             from stonks_trading.domains.trading.entities import Trade
+            from stonks_trading.domains.trading.repositories import save_trade_with_context
 
             trade_a = Trade(
                 symbol=symbol,

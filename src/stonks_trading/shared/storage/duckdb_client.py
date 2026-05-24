@@ -119,25 +119,28 @@ class DuckDBClient:
 
         features = features or {}
 
-        self._conn.execute("""
+        self._conn.execute(
+            """
             INSERT OR REPLACE INTO ohlcv_1m
             (symbol, timestamp, open, high, low, close, volume,
              trend_1h, rsi_1h, rsi_15m, roc, bb_width)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            candle.symbol,
-            candle.timestamp,
-            candle.open,
-            candle.high,
-            candle.low,
-            candle.close,
-            candle.volume,
-            features.get("trend_1h"),
-            features.get("rsi_1h"),
-            features.get("rsi_15m"),
-            features.get("roc"),
-            features.get("bb_width"),
-        ))
+        """,
+            (
+                candle.symbol,
+                candle.timestamp,
+                candle.open,
+                candle.high,
+                candle.low,
+                candle.close,
+                candle.volume,
+                features.get("trend_1h"),
+                features.get("rsi_1h"),
+                features.get("rsi_15m"),
+                features.get("roc"),
+                features.get("bb_width"),
+            ),
+        )
 
     def insert_candles_batch(
         self,
@@ -170,28 +173,33 @@ class DuckDBClient:
         data = []
         for i, candle in enumerate(candles):
             features = features_list[i] if features_list else {}
-            data.append((
-                candle.symbol,
-                candle.timestamp,
-                candle.open,
-                candle.high,
-                candle.low,
-                candle.close,
-                candle.volume,
-                features.get("trend_1h"),
-                features.get("rsi_1h"),
-                features.get("rsi_15m"),
-                features.get("roc"),
-                features.get("bb_width"),
-            ))
+            data.append(
+                (
+                    candle.symbol,
+                    candle.timestamp,
+                    candle.open,
+                    candle.high,
+                    candle.low,
+                    candle.close,
+                    candle.volume,
+                    features.get("trend_1h"),
+                    features.get("rsi_1h"),
+                    features.get("rsi_15m"),
+                    features.get("roc"),
+                    features.get("bb_width"),
+                )
+            )
 
         # Use executemany for bulk insert
-        self._conn.executemany("""
+        self._conn.executemany(
+            """
             INSERT OR REPLACE INTO ohlcv_1m
             (symbol, timestamp, open, high, low, close, volume,
              trend_1h, rsi_1h, rsi_15m, roc, bb_width)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, data)
+        """,
+            data,
+        )
 
         return len(candles)
 
@@ -221,11 +229,14 @@ class DuckDBClient:
 
         since = datetime.utcnow() - lookback
 
-        result = self._conn.execute("""
+        result = self._conn.execute(
+            """
             SELECT * FROM ohlcv_1m
             WHERE symbol = ? AND timestamp >= ?
             ORDER BY timestamp ASC
-        """, (symbol.value, since))
+        """,
+            (symbol.value, since),
+        )
 
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
@@ -255,11 +266,14 @@ class DuckDBClient:
         if not self._conn:
             raise RuntimeError("Not connected to DuckDB")
 
-        result = self._conn.execute("""
+        result = self._conn.execute(
+            """
             SELECT * FROM ohlcv_1m
             WHERE symbol = ? AND timestamp >= ? AND timestamp <= ?
             ORDER BY timestamp ASC
-        """, (symbol.value, start, end))
+        """,
+            (symbol.value, start, end),
+        )
 
         columns = [desc[0] for desc in result.description]
         rows = result.fetchall()
@@ -284,10 +298,13 @@ class DuckDBClient:
         if not self._conn:
             raise RuntimeError("Not connected to DuckDB")
 
-        result = self._conn.execute("""
+        result = self._conn.execute(
+            """
             SELECT MAX(timestamp) FROM ohlcv_1m
             WHERE symbol = ?
-        """, (symbol.value,))
+        """,
+            (symbol.value,),
+        )
 
         row = result.fetchone()
         return row[0] if row and row[0] else None
@@ -316,10 +333,13 @@ class DuckDBClient:
 
         cutoff = datetime.utcnow() - retention
 
-        result = self._conn.execute("""
+        result = self._conn.execute(
+            """
             DELETE FROM ohlcv_1m
             WHERE timestamp < ?
-        """, (cutoff,))
+        """,
+            (cutoff,),
+        )
 
         deleted = result.rowcount
 
@@ -347,9 +367,7 @@ class DuckDBClient:
             raise RuntimeError("Not connected to DuckDB")
 
         # Get row count
-        row_count_result = self._conn.execute(
-            "SELECT COUNT(*) FROM ohlcv_1m"
-        ).fetchone()
+        row_count_result = self._conn.execute("SELECT COUNT(*) FROM ohlcv_1m").fetchone()
         row_count = row_count_result[0] if row_count_result else 0
 
         # Get symbol counts

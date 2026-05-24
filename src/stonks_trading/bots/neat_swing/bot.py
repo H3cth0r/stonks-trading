@@ -179,9 +179,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         while self._running:
             try:
                 # Wait for candle with timeout
-                candle = await asyncio.wait_for(
-                    self.candle_queue.get(), timeout=60.0
-                )
+                candle = await asyncio.wait_for(self.candle_queue.get(), timeout=60.0)
 
                 symbol = Symbol(value=candle["symbol"])
                 if symbol not in self.strategy.networks:
@@ -205,9 +203,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                             + (trade.realized_pnl.amount if trade.realized_pnl else 0)
                         )
                         await self.persist_state()
-                        logger.info(
-                            f"Executed {action.value} for {symbol} at {candle['close']}"
-                        )
+                        logger.info(f"Executed {action.value} for {symbol} at {candle['close']}")
 
             except TimeoutError:
                 # Heartbeat - no candles received
@@ -216,9 +212,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                 logger.error(f"Error in main loop: {e}")
                 await asyncio.sleep(60)  # Back off on error
 
-    def _build_state_vector(
-        self, symbol: Symbol, candle: dict[str, Any]
-    ) -> list[float]:
+    def _build_state_vector(self, symbol: Symbol, candle: dict[str, Any]) -> list[float]:
         """Build 7-element state vector for NEAT network.
 
         Args:
@@ -234,13 +228,9 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         features = self.strategy.compute_features(symbol, [candle])
 
         # Build full state vector
-        return self.strategy.build_state_vector(
-            candle["close"], position, features
-        )
+        return self.strategy.build_state_vector(candle["close"], position, features)
 
-    def _determine_action(
-        self, buy_prob: float, sell_prob: float, symbol: Symbol
-    ) -> Side | None:
+    def _determine_action(self, buy_prob: float, sell_prob: float, symbol: Symbol) -> Side | None:
         """Determine trading action from NEAT output.
 
         Enforces 15-minute trade interval.
@@ -256,9 +246,8 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         # Check trade interval
         if self.state.last_trade_time:
             minutes_since = (
-                (asyncio.get_event_loop().time() - self.state.last_trade_time.timestamp())
-                / 60
-            )
+                asyncio.get_event_loop().time() - self.state.last_trade_time.timestamp()
+            ) / 60
             if minutes_since < MIN_TRADE_INTERVAL:
                 return None
 
@@ -360,9 +349,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             if self.adapter:
                 balances = self.adapter.get_balance()
                 if isinstance(balances, list):
-                    usdt_balance = next(
-                        (b.total for b in balances if b.asset == "USDT"), 0.0
-                    )
+                    usdt_balance = next((b.total for b in balances if b.asset == "USDT"), 0.0)
                 else:
                     usdt_balance = balances.total if balances.asset == "USDT" else 0.0
             else:

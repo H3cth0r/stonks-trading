@@ -1,6 +1,7 @@
 """Tests for BotContext value object."""
 
 import pytest
+
 from stonks_trading.bots import BotContext
 
 

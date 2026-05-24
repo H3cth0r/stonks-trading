@@ -1,7 +1,6 @@
 """Tests for BotRegistry and BotFactory."""
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 import pytest
@@ -15,7 +14,7 @@ from stonks_trading.bots import (
     BotRegistry,
 )
 from stonks_trading.domains.trading.entities import Signal
-from stonks_trading.domains.trading.enums import Side, TradingMode
+from stonks_trading.domains.trading.enums import TradingMode
 from stonks_trading.domains.trading.value_objects import Symbol
 
 
@@ -50,9 +49,7 @@ class MockStrategy(BaseStrategy):
     def version(self) -> str:
         return "1.0.0"
 
-    def compute_features(
-        self, symbol: Symbol, candles: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def compute_features(self, symbol: Symbol, candles: list[dict[str, Any]]) -> dict[str, Any]:
         return {"mock": True}
 
     def generate_signal(

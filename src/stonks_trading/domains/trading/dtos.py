@@ -5,6 +5,7 @@ All responses inherit from BaseResponse.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -265,7 +266,7 @@ class BotRegisterRequest(BaseModel):
     instance_id: str = Field(..., min_length=1, max_length=100)
     symbols: list[str] = Field(default_factory=list)
     mode: str = Field(default="dry_run", pattern="^(backtest|dry_run|live)$")
-    config: dict | None = None
+    config: dict[str, Any] | None = None
 
 
 class BotInstanceResponse(BaseResponse):
@@ -287,7 +288,7 @@ class BotStateResponse(BaseResponse):
     bot_type: str
     instance_id: str
     status: str
-    state: dict
+    state: dict[str, Any]
 
 
 class BotListResponse(BaseResponse):

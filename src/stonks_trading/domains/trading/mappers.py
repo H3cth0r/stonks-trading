@@ -195,7 +195,7 @@ class BotInstanceMapper:
             bot_type=entity.bot_type,
             instance_id=entity.instance_id,
             symbols=entity.symbols,
-            mode=entity.mode.value if hasattr(entity.mode, 'value') else str(entity.mode),
+            mode=entity.mode.value if hasattr(entity.mode, "value") else str(entity.mode),
             status=entity.status,
             created_at=entity.created_at,
             last_seen_at=entity.last_seen_at,

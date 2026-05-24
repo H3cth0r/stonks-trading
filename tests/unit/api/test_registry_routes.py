@@ -3,9 +3,10 @@
 Tests the bot registry endpoints for listing and registering bots.
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from stonks_trading.api import create_app
 from stonks_trading.domains.trading.entities import BotInstance
@@ -44,7 +45,9 @@ class TestListBotsEndpoint:
 
     async def test_list_bots_empty(self, client) -> None:
         """Test listing bots when none registered."""
-        with patch("stonks_trading.domains.trading.repositories.BotInstanceRepository.list_all") as mock_list:
+        with patch(
+            "stonks_trading.domains.trading.repositories.BotInstanceRepository.list_all"
+        ) as mock_list:
             mock_list.return_value = []
             response = await client.get("/api/v1/bots")
             assert response.status_code == 200
@@ -55,7 +58,9 @@ class TestListBotsEndpoint:
 
     async def test_list_bots_returns_registered_bots(self, client, mock_bot_instance) -> None:
         """Test listing bots returns registered instances."""
-        with patch("stonks_trading.domains.trading.repositories.BotInstanceRepository.list_all") as mock_list:
+        with patch(
+            "stonks_trading.domains.trading.repositories.BotInstanceRepository.list_all"
+        ) as mock_list:
             mock_list.return_value = [mock_bot_instance]
             response = await client.get("/api/v1/bots")
             assert response.status_code == 200
@@ -70,7 +75,9 @@ class TestListBotInstancesEndpoint:
 
     async def test_list_bot_instances_empty(self, client) -> None:
         """Test listing instances when none of type exist."""
-        with patch("stonks_trading.domains.trading.repositories.BotInstanceRepository.list_by_type") as mock_list:
+        with patch(
+            "stonks_trading.domains.trading.repositories.BotInstanceRepository.list_by_type"
+        ) as mock_list:
             mock_list.return_value = []
             response = await client.get("/api/v1/bots/neat_swing")
             assert response.status_code == 200
@@ -79,7 +86,9 @@ class TestListBotInstancesEndpoint:
 
     async def test_list_bot_instances_returns_instances(self, client, mock_bot_instance) -> None:
         """Test listing instances of a bot type."""
-        with patch("stonks_trading.domains.trading.repositories.BotInstanceRepository.list_by_type") as mock_list:
+        with patch(
+            "stonks_trading.domains.trading.repositories.BotInstanceRepository.list_by_type"
+        ) as mock_list:
             mock_list.return_value = [mock_bot_instance]
             response = await client.get("/api/v1/bots/neat_swing")
             assert response.status_code == 200
@@ -101,7 +110,9 @@ class TestRegisterBotEndpoint:
             id=2,
             status="stopped",
         )
-        with patch("stonks_trading.domains.trading.repositories.BotInstanceRepository.register") as mock_register:
+        with patch(
+            "stonks_trading.domains.trading.repositories.BotInstanceRepository.register"
+        ) as mock_register:
             mock_register.return_value = mock_instance
             response = await client.post(
                 "/api/v1/bots",

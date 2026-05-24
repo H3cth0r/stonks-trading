@@ -234,9 +234,9 @@ def status(duckdb_path: str) -> None:
         click.echo(f"Size: {stats['db_size_bytes'] / 1024 / 1024:.2f} MB")
         click.echo(f"Total rows: {stats['total_rows']}")
 
-        if stats['symbols']:
+        if stats["symbols"]:
             click.echo("\nSymbol coverage:")
-            for sym in stats['symbols']:
+            for sym in stats["symbols"]:
                 click.echo(f"  - {sym['symbol']}: {sym['row_count']} rows")
                 click.echo(f"    Range: {sym['earliest']} to {sym['latest']}")
         else:
@@ -268,17 +268,19 @@ def verify_features() -> None:
 
     for i in range(250 * 60):  # 250 hours
         noise = np.random.randn() * 100
-        candles.append(Candle(
-            symbol="BTC_USD",
-            venue="test",
-            timestamp=datetime.now(UTC) - timedelta(minutes=250 * 60 - i),
-            open=base_price + noise,
-            high=base_price + noise + 50,
-            low=base_price + noise - 50,
-            close=base_price + noise + 20,
-            volume=10.0,
-            closed=True,
-        ))
+        candles.append(
+            Candle(
+                symbol="BTC_USD",
+                venue="test",
+                timestamp=datetime.now(UTC) - timedelta(minutes=250 * 60 - i),
+                open=base_price + noise,
+                high=base_price + noise + 50,
+                low=base_price + noise - 50,
+                close=base_price + noise + 20,
+                volume=10.0,
+                closed=True,
+            )
+        )
 
     # Compute via live feature computer
     live = LiveFeatureComputer()
@@ -287,10 +289,12 @@ def verify_features() -> None:
     live_features = live.on_candle(candles[-1])
 
     # Compute via training function
-    df = pd.DataFrame([
-        {"Open": c.open, "High": c.high, "Low": c.low, "Close": c.close, "Volume": c.volume}
-        for c in candles
-    ])
+    df = pd.DataFrame(
+        [
+            {"Open": c.open, "High": c.high, "Low": c.low, "Close": c.close, "Volume": c.volume}
+            for c in candles
+        ]
+    )
     df.index = pd.DatetimeIndex([c.timestamp for c in candles])
     train_df = engineer_features(df)
     train_features = train_df.iloc[-1]

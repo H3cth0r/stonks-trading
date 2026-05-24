@@ -57,7 +57,7 @@ class BinanceAdapter(MarketDataAdapter):
         self._reconnect_attempts = 0
         self._max_reconnect_delay = 60
         self._running = False
-        self._message_task: asyncio.Task | None = None
+        self._message_task: asyncio.Task[Any] | None = None
         self._use_testnet = use_testnet
 
         # Select URLs based on testnet flag
@@ -113,9 +113,7 @@ class BinanceAdapter(MarketDataAdapter):
         # Build stream path
         # Production WebSocket is public and free - works for both mainnet and testnet
         # Testnet WebSocket for klines is often unavailable, so we use production WS
-        streams = "/".join(
-            f"{self._to_venue_symbol(s).lower()}@kline_1m" for s in symbols
-        )
+        streams = "/".join(f"{self._to_venue_symbol(s).lower()}@kline_1m" for s in symbols)
 
         # Always use production WebSocket for market data (klines are public)
         # Testnet is only used for REST API (orders, account)

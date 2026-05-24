@@ -200,11 +200,7 @@ class NeatSwingStrategy(BaseStrategy):
         is_invested = 1.0 if current_position and current_position.quantity > 0 else -1.0
 
         # 2. Unrealized PnL
-        if (
-            current_position
-            and current_position.quantity > 0
-            and current_position.entry_price
-        ):
+        if current_position and current_position.quantity > 0 and current_position.entry_price:
             unrealized_pnl = (
                 price - current_position.entry_price.amount
             ) / current_position.entry_price.amount

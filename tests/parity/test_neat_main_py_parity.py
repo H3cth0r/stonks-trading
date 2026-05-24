@@ -16,8 +16,8 @@ STRATEGY_RESEARCH = Path("/Users/h3cth0r/Documents/strategy-research")
 if str(STRATEGY_RESEARCH) not in sys.path:
     sys.path.insert(0, str(STRATEGY_RESEARCH))
 
-from stonks_trading.domains.trading.neat.trading_env import TradingEnv
 from stonks_trading.domains.trading.neat.fitness import calculate_fitness
+from stonks_trading.domains.trading.neat.trading_env import TradingEnv
 
 
 def load_sample_data() -> pd.DataFrame:
@@ -249,12 +249,18 @@ class TestFitnessParity:
 
         # Simulate many trades
         for i in range(0, 100, 2):
-            env.trades.append(type("obj", (object,), {
-                "step": i,
-                "trade_type": "buy",
-                "price": 100.0,
-                "timestamp": data.index[i],
-            })())
+            env.trades.append(
+                type(
+                    "obj",
+                    (object,),
+                    {
+                        "step": i,
+                        "trade_type": "buy",
+                        "price": 100.0,
+                        "timestamp": data.index[i],
+                    },
+                )()
+            )
 
         assert len(env.trades) > 40
 
@@ -273,14 +279,30 @@ class TestFitnessParity:
         env = TradingEnv(data, initial_capital=10000.0)
 
         # Add minimal trades to avoid inactivity penalty
-        env.trades.append(type("obj", (object,), {
-            "step": 0, "trade_type": "buy", "price": 100.0,
-            "timestamp": data.index[0],
-        })())
-        env.trades.append(type("obj", (object,), {
-            "step": 1, "trade_type": "sell", "price": 100.0,
-            "timestamp": data.index[1],
-        })())
+        env.trades.append(
+            type(
+                "obj",
+                (object,),
+                {
+                    "step": 0,
+                    "trade_type": "buy",
+                    "price": 100.0,
+                    "timestamp": data.index[0],
+                },
+            )()
+        )
+        env.trades.append(
+            type(
+                "obj",
+                (object,),
+                {
+                    "step": 1,
+                    "trade_type": "sell",
+                    "price": 100.0,
+                    "timestamp": data.index[1],
+                },
+            )()
+        )
 
         # Equity below 60% threshold
         equity_curve = [10000.0, 5000.0]  # 50% drawdown

@@ -59,6 +59,7 @@ class TestNeatParity:
             pytest.skip("No NEAT config found")
 
         import neat
+
         return neat.Config(
             neat.DefaultGenome,
             neat.DefaultReproduction,
@@ -92,7 +93,13 @@ class TestNeatParity:
             price=50000.0,
             is_invested=True,
             unrealized_pnl=0.05,
-            features={"trend_1h": 0.01, "rsi_1h": 0.6, "rsi_15m": 0.5, "roc": 0.02, "bb_width": 0.01},
+            features={
+                "trend_1h": 0.01,
+                "rsi_1h": 0.6,
+                "rsi_15m": 0.5,
+                "roc": 0.02,
+                "bb_width": 0.01,
+            },
         )
         assert state_invested[0] == 1.0
         assert 0.04 <= state_invested[1] <= 0.06
@@ -102,7 +109,13 @@ class TestNeatParity:
             price=50000.0,
             is_invested=False,
             unrealized_pnl=0.0,
-            features={"trend_1h": 0.01, "rsi_1h": 0.6, "rsi_15m": 0.5, "roc": 0.02, "bb_width": 0.01},
+            features={
+                "trend_1h": 0.01,
+                "rsi_1h": 0.6,
+                "rsi_15m": 0.5,
+                "roc": 0.02,
+                "bb_width": 0.01,
+            },
         )
         assert state_no_position[0] == -1.0
         assert state_no_position[1] == 0.0
@@ -114,9 +127,9 @@ class TestNeatParity:
         # Test with extreme values that should be clipped
         extreme_features = {
             "trend_1h": 100.0,  # Should clip to 5.0
-            "rsi_1h": 200.0,   # Should clip to 5.0
+            "rsi_1h": 200.0,  # Should clip to 5.0
             "rsi_15m": -100.0,  # Should clip to -5.0
-            "roc": 50.0,       # Should clip to 5.0
+            "roc": 50.0,  # Should clip to 5.0
             "bb_width": -50.0,  # Should clip to -5.0
         }
 
@@ -140,10 +153,10 @@ class TestNeatParity:
         assert state[1] == 0.5
 
         # Market features should be clipped (100 -> 5, 200 -> 5, -100 -> -5, etc.)
-        assert state[2] == 5.0   # trend_1h: 100 clipped to 5
-        assert state[3] == 5.0   # rsi_1h: 200 clipped to 5
+        assert state[2] == 5.0  # trend_1h: 100 clipped to 5
+        assert state[3] == 5.0  # rsi_1h: 200 clipped to 5
         assert state[4] == -5.0  # rsi_15m: -100 clipped to -5
-        assert state[5] == 5.0   # roc: 50 clipped to 5
+        assert state[5] == 5.0  # roc: 50 clipped to 5
         assert state[6] == -5.0  # bb_width: -50 clipped to -5
 
     def test_decision_threshold_constant(self) -> None:
@@ -153,7 +166,10 @@ class TestNeatParity:
         assert DECISION_THRESHOLD == 0.6
 
         # Also verify in feature engineering
-        from stonks_trading.bots.neat_swing.feature_engineering import DECISION_THRESHOLD as FE_DECISION_THRESHOLD
+        from stonks_trading.bots.neat_swing.feature_engineering import (
+            DECISION_THRESHOLD as FE_DECISION_THRESHOLD,
+        )
+
         assert FE_DECISION_THRESHOLD == 0.6
 
     def test_transaction_fee_constant(self) -> None:
@@ -163,7 +179,10 @@ class TestNeatParity:
         assert TRANSACTION_FEE == 0.001
 
         # Also verify in feature engineering
-        from stonks_trading.bots.neat_swing.feature_engineering import TRANSACTION_FEE as FE_TRANSACTION_FEE
+        from stonks_trading.bots.neat_swing.feature_engineering import (
+            TRANSACTION_FEE as FE_TRANSACTION_FEE,
+        )
+
         assert FE_TRANSACTION_FEE == 0.001
 
     def test_recurrent_network_not_feedforward(self, genome, neat_config) -> None:
@@ -193,7 +212,7 @@ class TestNeatParity:
 
     def test_all_in_buy_logic(self, genome, neat_config) -> None:
         """N7a: All-in buy when buy_prob > threshold > sell_prob."""
-        from stonks_trading.bots.neat_swing.strategy import NeatSwingStrategy, DECISION_THRESHOLD
+        from stonks_trading.bots.neat_swing.strategy import DECISION_THRESHOLD, NeatSwingStrategy
 
         strategy = NeatSwingStrategy()
         strategy.load_genome(None, genome, neat_config)
@@ -216,7 +235,7 @@ class TestNeatParity:
 
     def test_all_out_sell_logic(self, genome, neat_config) -> None:
         """N7b: All-out sell when sell_prob > threshold > buy_prob."""
-        from stonks_trading.bots.neat_swing.strategy import NeatSwingStrategy, DECISION_THRESHOLD
+        from stonks_trading.bots.neat_swing.strategy import DECISION_THRESHOLD, NeatSwingStrategy
 
         strategy = NeatSwingStrategy()
         strategy.load_genome(None, genome, neat_config)
@@ -249,8 +268,10 @@ class TestNeatParity:
 
         # Verify network can be created from restored genome
         from neat.nn import RecurrentNetwork
+
         config_path = NEAT_DIR / "config-neat.txt"
         import neat
+
         config = neat.Config(
             neat.DefaultGenome,
             neat.DefaultReproduction,
@@ -285,13 +306,15 @@ class TestNeatParity:
         for i, date in enumerate(dates):
             # Random walk price
             price = price + np.random.randn() * 10
-            candles.append({
-                "open": price - np.random.rand() * 5,
-                "high": price + np.random.rand() * 10,
-                "low": price - np.random.rand() * 10,
-                "close": price,
-                "volume": np.random.uniform(1, 100),
-            })
+            candles.append(
+                {
+                    "open": price - np.random.rand() * 5,
+                    "high": price + np.random.rand() * 10,
+                    "low": price - np.random.rand() * 10,
+                    "close": price,
+                    "volume": np.random.uniform(1, 100),
+                }
+            )
 
         # Compute features
         features = compute_features(candles)
@@ -329,13 +352,15 @@ class TestNeatFeatureParity:
         price = 50000.0
         for date in dates:
             price = price + np.random.randn() * 10
-            candles.append({
-                "open": price,
-                "high": price + 5,
-                "low": price - 5,
-                "close": price,
-                "volume": 10.0,
-            })
+            candles.append(
+                {
+                    "open": price,
+                    "high": price + 5,
+                    "low": price - 5,
+                    "close": price,
+                    "volume": 10.0,
+                }
+            )
 
         features = compute_features(candles)
 
@@ -356,13 +381,15 @@ class TestNeatFeatureParity:
         price = 50000.0
         for date in dates:
             price = price + np.random.randn() * 10
-            candles.append({
-                "open": price,
-                "high": price + 5,
-                "low": price - 5,
-                "close": price,
-                "volume": 10.0,
-            })
+            candles.append(
+                {
+                    "open": price,
+                    "high": price + 5,
+                    "low": price - 5,
+                    "close": price,
+                    "volume": 10.0,
+                }
+            )
 
         features = compute_features(candles)
 
@@ -381,13 +408,15 @@ class TestNeatFeatureParity:
         price = 50000.0
         for date in dates:
             price = price + np.random.randn() * 10
-            candles.append({
-                "open": price,
-                "high": price + 5,
-                "low": price - 5,
-                "close": price,
-                "volume": 10.0,
-            })
+            candles.append(
+                {
+                    "open": price,
+                    "high": price + 5,
+                    "low": price - 5,
+                    "close": price,
+                    "volume": 10.0,
+                }
+            )
 
         features = compute_features(candles)
 
@@ -414,7 +443,7 @@ class TestNeatStateVector:
 
         assert len(state) == 7
         assert state[0] == -1.0  # is_invested = -1.0 (not invested)
-        assert state[1] == 0.0   # unrealized_pnl = 0.0 (no position)
+        assert state[1] == 0.0  # unrealized_pnl = 0.0 (no position)
 
     def test_state_vector_invested_position(self) -> None:
         """Test state vector when in an invested position."""
@@ -430,7 +459,7 @@ class TestNeatStateVector:
         )
 
         assert len(state) == 7
-        assert state[0] == 1.0   # is_invested = 1.0
+        assert state[0] == 1.0  # is_invested = 1.0
         assert abs(state[1] - 0.05) < 0.001  # 5% unrealized PnL
 
     def test_state_vector_order_matches_neat(self) -> None:
@@ -448,11 +477,11 @@ class TestNeatStateVector:
 
         # From NEAT/main.py line 133: state = np.hstack(([is_invested, unrealized_pnl], mkt))
         # Where mkt = self.feats[step] = [trend_1h, rsi_1h, rsi_15m, roc, bb_width]
-        assert state[0] == 1.0   # is_invested
+        assert state[0] == 1.0  # is_invested
         assert abs(state[1] - 0.10) < 0.001  # unrealized_pnl
         assert state[2] == 0.01  # trend_1h
-        assert state[3] == 0.6   # rsi_1h
-        assert state[4] == 0.5   # rsi_15m
+        assert state[3] == 0.6  # rsi_1h
+        assert state[4] == 0.5  # rsi_15m
         assert state[5] == 0.02  # roc
         assert state[6] == 0.01  # bb_width
 
@@ -483,13 +512,15 @@ class TestNeatStrategyInterface:
         price = 50000.0
         for date in dates:
             price = price + np.random.randn() * 10
-            candles.append({
-                "open": price,
-                "high": price + 5,
-                "low": price - 5,
-                "close": price,
-                "volume": 10.0,
-            })
+            candles.append(
+                {
+                    "open": price,
+                    "high": price + 5,
+                    "low": price - 5,
+                    "close": price,
+                    "volume": 10.0,
+                }
+            )
 
         features = strategy.compute_features(Symbol(value="BTC_USD"), candles)
 
@@ -507,7 +538,13 @@ class TestNeatStrategyInterface:
         result = strategy.generate_signal(
             symbol=Symbol(value="BTC_USD"),
             candle={"close": 50000.0},
-            features={"trend_1h": 0.01, "rsi_1h": 0.5, "rsi_15m": 0.5, "roc": 0.0, "bb_width": 0.01},
+            features={
+                "trend_1h": 0.01,
+                "rsi_1h": 0.5,
+                "rsi_15m": 0.5,
+                "roc": 0.0,
+                "bb_width": 0.01,
+            },
             current_position=None,
         )
 

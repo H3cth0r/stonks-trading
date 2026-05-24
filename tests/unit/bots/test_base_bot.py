@@ -4,8 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-import pytest
-
 from stonks_trading.bots import BaseBot, BaseBotState, BaseStrategy, BotContext
 from stonks_trading.domains.trading.entities import Signal
 from stonks_trading.domains.trading.enums import Side, TradingMode
@@ -47,9 +45,7 @@ class TestStrategy(BaseStrategy):
     def version(self) -> str:
         return "1.0.0"
 
-    def compute_features(
-        self, symbol: Symbol, candles: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def compute_features(self, symbol: Symbol, candles: list[dict[str, Any]]) -> dict[str, Any]:
         return {"sma": 100.0}
 
     def generate_signal(
@@ -193,9 +189,7 @@ class TestBaseStrategy:
         """Should compute features from candles."""
         strategy = TestStrategy()
         symbol = Symbol(value="BTC_USD")
-        candles = [
-            {"open": 100, "high": 110, "low": 90, "close": 105, "volume": 1000}
-        ]
+        candles = [{"open": 100, "high": 110, "low": 90, "close": 105, "volume": 1000}]
 
         features = strategy.compute_features(symbol, candles)
 

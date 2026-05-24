@@ -216,7 +216,7 @@ class BinanceAdapter(IExchangeAdapter):
             return await self._signed_request(method, endpoint, params)
 
         response.raise_for_status()
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def _public_request(
         self,
@@ -227,7 +227,7 @@ class BinanceAdapter(IExchangeAdapter):
         url = f"{self.base_url}{endpoint}"
         response = await self.client.get(url, params=params)
         response.raise_for_status()
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def place_order(
         self,
@@ -348,7 +348,7 @@ class BinanceAdapter(IExchangeAdapter):
         return await self._public_request(
             "/api/v3/trades",
             {"symbol": venue_symbol.value.upper(), "limit": limit},
-        )
+        )  # type: ignore[no-any-return]
 
     async def get_fee_tier(self) -> dict[str, Any]:
         """Get trading fee tier from Binance."""

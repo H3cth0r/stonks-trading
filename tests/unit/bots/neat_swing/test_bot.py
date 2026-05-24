@@ -39,13 +39,15 @@ def mock_strategy() -> MagicMock:
     strategy = MagicMock(spec=NeatSwingStrategy)
     strategy.networks = {}
     strategy.neat_config = MagicMock()
-    strategy.compute_features = MagicMock(return_value={
-        "trend_1h": 0.0,
-        "rsi_1h": 0.5,
-        "rsi_15m": 0.5,
-        "roc": 0.0,
-        "bb_width": 0.0,
-    })
+    strategy.compute_features = MagicMock(
+        return_value={
+            "trend_1h": 0.0,
+            "rsi_1h": 0.5,
+            "rsi_15m": 0.5,
+            "roc": 0.0,
+            "bb_width": 0.0,
+        }
+    )
 
     def fake_build_state_vector(
         price: float, position: Position | None, features: dict[str, Any]
@@ -87,17 +89,21 @@ def bot(mock_strategy: MagicMock) -> NeatSwingBot:
 def mock_adapter() -> MagicMock:
     """Create a mock exchange adapter."""
     adapter = MagicMock()
-    adapter.get_balance = MagicMock(return_value=[
-        FakeBalance("USDT", 10000.0),
-        FakeBalance("BTC", 0.0),
-    ])
-    adapter.place_order = AsyncMock(return_value=MagicMock(
-        success=True,
-        order_id="mock-1",
-        fill_price=Money(amount=50000.0, currency="USDT"),
-        filled_quantity=0.1,
-        fee=Money(amount=5.0, currency="USDT"),
-    ))
+    adapter.get_balance = MagicMock(
+        return_value=[
+            FakeBalance("USDT", 10000.0),
+            FakeBalance("BTC", 0.0),
+        ]
+    )
+    adapter.place_order = AsyncMock(
+        return_value=MagicMock(
+            success=True,
+            order_id="mock-1",
+            fill_price=Money(amount=50000.0, currency="USDT"),
+            filled_quantity=0.1,
+            fee=Money(amount=5.0, currency="USDT"),
+        )
+    )
     return adapter
 
 
@@ -203,9 +209,7 @@ class TestCalculateQuantity:
         bot.adapter = mock_adapter
         candle = {"close": 50000.0}
         position = None
-        quantity = bot._calculate_quantity(
-            Symbol(value="BTC_USD"), candle, Side.BUY, position
-        )
+        quantity = bot._calculate_quantity(Symbol(value="BTC_USD"), candle, Side.BUY, position)
         assert quantity > 0
         # With 10k USDT at 50k price, minus 0.1% fee
         assert quantity < 0.2
@@ -215,9 +219,7 @@ class TestCalculateQuantity:
         bot.adapter = None
         bot.state.current_equity = 5000.0
         candle = {"close": 50000.0}
-        quantity = bot._calculate_quantity(
-            Symbol(value="BTC_USD"), candle, Side.BUY, None
-        )
+        quantity = bot._calculate_quantity(Symbol(value="BTC_USD"), candle, Side.BUY, None)
         assert quantity > 0
 
     def test_sell_all_out(self, bot: NeatSwingBot) -> None:
@@ -228,17 +230,13 @@ class TestCalculateQuantity:
             quantity=0.1,
             entry_price=Money(amount=49000.0, currency="USDT"),
         )
-        quantity = bot._calculate_quantity(
-            Symbol(value="BTC_USD"), candle, Side.SELL, position
-        )
+        quantity = bot._calculate_quantity(Symbol(value="BTC_USD"), candle, Side.SELL, position)
         assert quantity == 0.1
 
     def test_sell_no_position(self, bot: NeatSwingBot) -> None:
         """Sell with no position returns 0."""
         candle = {"close": 50000.0}
-        quantity = bot._calculate_quantity(
-            Symbol(value="BTC_USD"), candle, Side.SELL, None
-        )
+        quantity = bot._calculate_quantity(Symbol(value="BTC_USD"), candle, Side.SELL, None)
         assert quantity == 0.0
 
     def test_buy_with_non_list_balance(self, bot: NeatSwingBot) -> None:
@@ -247,9 +245,7 @@ class TestCalculateQuantity:
         adapter.get_balance = MagicMock(return_value=FakeBalance("USDT", 5000.0))
         bot.adapter = adapter
         candle = {"close": 50000.0}
-        quantity = bot._calculate_quantity(
-            Symbol(value="BTC_USD"), candle, Side.BUY, None
-        )
+        quantity = bot._calculate_quantity(Symbol(value="BTC_USD"), candle, Side.BUY, None)
         assert quantity > 0
         assert quantity < 0.11
 
@@ -262,9 +258,7 @@ class TestExecuteTrade:
         """_execute_trade returns None when no adapter."""
         bot.adapter = None
         candle = {"close": 50000.0}
-        result = await bot._execute_trade(
-            Symbol(value="BTC_USD"), Side.BUY, candle
-        )
+        result = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
         assert result is None
 
     @pytest.mark.asyncio
@@ -281,17 +275,13 @@ class TestExecuteTrade:
         fake_result.trade = fake_trade
         fake_result.error = None
 
-        with patch(
-            "stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase"
-        ) as mock_uc_class:
+        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
             candle = {"close": 50000.0}
-            trade = await bot._execute_trade(
-                Symbol(value="BTC_USD"), Side.BUY, candle
-            )
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") in bot.state.positions
@@ -315,17 +305,13 @@ class TestExecuteTrade:
         fake_result.trade = fake_trade
         fake_result.error = None
 
-        with patch(
-            "stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase"
-        ) as mock_uc_class:
+        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
             candle = {"close": 50000.0}
-            trade = await bot._execute_trade(
-                Symbol(value="BTC_USD"), Side.SELL, candle
-            )
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, candle)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") not in bot.state.positions
@@ -334,25 +320,23 @@ class TestExecuteTrade:
     async def test_failed_trade_returns_none(self, bot: NeatSwingBot) -> None:
         """Failed trade returns None."""
         bot.adapter = MagicMock()
-        bot.adapter.get_balance = MagicMock(return_value=[
-            FakeBalance("USDT", 10000.0),
-        ])
+        bot.adapter.get_balance = MagicMock(
+            return_value=[
+                FakeBalance("USDT", 10000.0),
+            ]
+        )
         fake_result = MagicMock()
         fake_result.success = False
         fake_result.trade = None
         fake_result.error = "Risk check failed"
 
-        with patch(
-            "stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase"
-        ) as mock_uc_class:
+        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
             candle = {"close": 50000.0}
-            trade = await bot._execute_trade(
-                Symbol(value="BTC_USD"), Side.BUY, candle
-            )
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
 
             assert trade is None
 
@@ -375,17 +359,13 @@ class TestExecuteTrade:
         fake_result.trade = fake_trade
         fake_result.error = None
 
-        with patch(
-            "stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase"
-        ) as mock_uc_class:
+        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
             candle = {"close": 50000.0}
-            trade = await bot._execute_trade(
-                Symbol(value="BTC_USD"), Side.BUY, candle
-            )
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
 
             assert trade is not None
             position = bot.state.positions[Symbol(value="BTC_USD")]
@@ -410,26 +390,20 @@ class TestExecuteTrade:
         fake_result.trade = fake_trade
         fake_result.error = None
 
-        with patch(
-            "stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase"
-        ) as mock_uc_class:
+        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
             candle = {"close": 50000.0}
-            trade = await bot._execute_trade(
-                Symbol(value="BTC_USD"), Side.SELL, candle
-            )
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, candle)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") in bot.state.positions
             assert bot.state.positions[Symbol(value="BTC_USD")].quantity == 0.05
 
     @pytest.mark.asyncio
-    async def test_sell_without_position(
-        self, bot: NeatSwingBot, mock_adapter: MagicMock
-    ) -> None:
+    async def test_sell_without_position(self, bot: NeatSwingBot, mock_adapter: MagicMock) -> None:
         """Sell trade without existing position returns trade but does not modify state."""
         bot.adapter = mock_adapter
         fake_trade = MagicMock()
@@ -440,17 +414,13 @@ class TestExecuteTrade:
         fake_result.trade = fake_trade
         fake_result.error = None
 
-        with patch(
-            "stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase"
-        ) as mock_uc_class:
+        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
             candle = {"close": 50000.0}
-            trade = await bot._execute_trade(
-                Symbol(value="BTC_USD"), Side.SELL, candle
-            )
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, candle)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") not in bot.state.positions
@@ -527,7 +497,7 @@ class TestMainLoop:
             # After first call, wait until bot stops then raise TimeoutError
             while bot._running:
                 await asyncio.sleep(0.01)
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         async def stop_after_process():
             await asyncio.sleep(0.05)
@@ -548,11 +518,11 @@ class TestMainLoop:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
             # After first timeout, wait until bot stops then raise again
             while bot._running:
                 await asyncio.sleep(0.01)
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         async def stop_shortly():
             await asyncio.sleep(0.05)
@@ -580,9 +550,7 @@ class TestMainLoop:
         fake_result.trade = fake_trade
         fake_result.error = None
 
-        with patch(
-            "stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase"
-        ) as mock_uc_class:
+        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
@@ -607,14 +575,15 @@ class TestMainLoop:
                     return await coro
                 while bot._running:
                     await asyncio.sleep(0.01)
-                raise asyncio.TimeoutError()
+                raise TimeoutError()
 
             async def stop_after():
                 await asyncio.sleep(0.05)
                 bot._running = False
 
-            with patch("asyncio.wait_for", side_effect=fake_wait_for), patch.object(
-                bot, "persist_state", new_callable=AsyncMock
+            with (
+                patch("asyncio.wait_for", side_effect=fake_wait_for),
+                patch.object(bot, "persist_state", new_callable=AsyncMock),
             ):
                 asyncio.create_task(stop_after())
                 await bot._main_loop()
@@ -642,7 +611,7 @@ class TestMainLoop:
                 raise ValueError("boom")
             while bot._running:
                 await asyncio.sleep(0.01)
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
 
         async def stop_after():
             await asyncio.sleep(0.08)
@@ -656,9 +625,11 @@ class TestMainLoop:
         async def quick_sleep(*args, **kwargs):
             await real_sleep(0)
 
-        with patch("asyncio.wait_for", side_effect=fake_wait_for), patch(
-            "stonks_trading.bots.neat_swing.bot.asyncio.sleep", side_effect=quick_sleep
-        ), patch("stonks_trading.bots.neat_swing.bot.logger") as mock_logger:
+        with (
+            patch("asyncio.wait_for", side_effect=fake_wait_for),
+            patch("stonks_trading.bots.neat_swing.bot.asyncio.sleep", side_effect=quick_sleep),
+            patch("stonks_trading.bots.neat_swing.bot.logger") as mock_logger,
+        ):
             asyncio.create_task(stop_after())
             await bot._main_loop()
 

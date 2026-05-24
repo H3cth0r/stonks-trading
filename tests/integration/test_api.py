@@ -5,21 +5,23 @@ request validation, and response formatting.
 """
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-from unittest.mock import AsyncMock, MagicMock, patch
+from httpx import ASGITransport, AsyncClient
+from tortoise import Tortoise
 
 from stonks_trading.api import create_app
-from stonks_trading.domains.trading.routes import get_trading_router
-from stonks_trading.shared.database import init_db, close_db
 
 
 # Database fixture for tests
 @pytest.fixture(autouse=True)
 async def initialize_db():
-    """Initialize database for tests."""
-    await init_db()
+    """Initialize in-memory SQLite database for tests."""
+    await Tortoise.init(
+        db_url="sqlite://:memory:",
+        modules={"models": ["stonks_trading.shared.postgres_models"]},
+    )
+    await Tortoise.generate_schemas()
     yield
-    await close_db()
+    await Tortoise.close_connections()
 
 
 @pytest.fixture

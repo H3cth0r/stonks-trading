@@ -189,12 +189,14 @@ def main() -> None:
     logging.getLogger().setLevel(args["log_level"])
 
     try:
-        asyncio.run(run_bot(
-            symbols=args["symbols"],
-            mode=args["mode"],
-            instance_id=args["instance_id"],
-            config_path=args["config_path"],
-        ))
+        asyncio.run(
+            run_bot(
+                symbols=args["symbols"],
+                mode=args["mode"],
+                instance_id=args["instance_id"],
+                config_path=args["config_path"],
+            )
+        )
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:

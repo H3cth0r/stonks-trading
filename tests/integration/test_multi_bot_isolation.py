@@ -10,7 +10,6 @@ These tests verify the contract that:
 """
 
 from datetime import datetime
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -24,7 +23,6 @@ from stonks_trading.domains.trading.repositories import (
     close_position_by_bot,
     get_position_by_bot_and_symbol,
     list_positions_by_bot,
-    save_position_with_context,
     save_trade_with_context,
 )
 from stonks_trading.domains.trading.value_objects import Money, Symbol

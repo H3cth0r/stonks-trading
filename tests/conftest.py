@@ -27,6 +27,7 @@ settings.register_profile("debug", max_examples=10, deadline=None, verbosity=2)
 
 # Load profile from env or use default
 import os
+
 settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 

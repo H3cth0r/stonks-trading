@@ -65,9 +65,7 @@ class NeatSwingState(BaseBotState):
             "daily_loss_pct": self.daily_loss_pct,
             "in_safe_mode": self.in_safe_mode,
             "last_realized_loss_time": (
-                self.last_realized_loss_time.isoformat()
-                if self.last_realized_loss_time
-                else None
+                self.last_realized_loss_time.isoformat() if self.last_realized_loss_time else None
             ),
         }
 

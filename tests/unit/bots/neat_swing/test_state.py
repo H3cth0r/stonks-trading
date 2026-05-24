@@ -1,13 +1,10 @@
 """Unit tests for NeatSwingState."""
 
 from datetime import datetime
-from unittest.mock import MagicMock
 
 import pytest
 
 from stonks_trading.bots.neat_swing.state import NeatSwingState
-from stonks_trading.domains.trading.entities import Position
-from stonks_trading.domains.trading.value_objects import Money, Symbol
 
 
 class TestNeatSwingState:

@@ -4,28 +4,29 @@ These tests verify database connectivity and ORM functionality.
 They require a running database and are skipped in CI if not available.
 """
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from stonks_trading.shared.database import TORTOISE_ORM, init_db, close_db
+import pytest
+
+from stonks_trading.shared.database import TORTOISE_ORM, close_db, init_db
 from stonks_trading.shared.postgres_models import (
-    TradeModel,
-    PositionModel,
+    BotDecisionModel,
+    DataGapModel,
+    GenerationMetricModel,
     GenomeModel,
     OrderModel,
+    PositionModel,
     RiskEventModel,
-    BotDecisionModel,
-    TrainingRunModel,
-    GenerationMetricModel,
-    DataGapModel,
     SystemConfigModel,
+    TradeModel,
     TradeSide,
     TradingMode,
+    TrainingRunModel,
 )
 
-
 pytestmark = pytest.mark.skipif(
-    "DATABASE_URL" not in pytest.importorskip("os").environ or "localhost" in pytest.importorskip("os").environ.get("DATABASE_URL", ""),
+    "DATABASE_URL" not in pytest.importorskip("os").environ
+    or "localhost" in pytest.importorskip("os").environ.get("DATABASE_URL", ""),
     reason="Database integration tests require DATABASE_URL",
 )
 
@@ -186,7 +187,7 @@ class TestGenomeModel:
             model_family="NEAT_RNN_V1",
             is_active=True,
             fee_rate_used=0.001,
-            trained_at=datetime.now(timezone.utc),
+            trained_at=datetime.now(UTC),
         )
         assert genome.id is not None
         assert genome.fitness == 1.25
@@ -198,7 +199,7 @@ class TestGenomeModel:
             genome_data=b"test",
             fitness=1.0,
             is_active=True,
-            trained_at=datetime.now(timezone.utc),
+            trained_at=datetime.now(UTC),
         )
         genome = await GenomeModel.get(is_active=True)
         assert genome.is_active is True
@@ -209,13 +210,13 @@ class TestGenomeModel:
             symbol="BTC_USD",
             genome_data=b"test",
             fitness=1.0,
-            trained_at=datetime.now(timezone.utc),
+            trained_at=datetime.now(UTC),
         )
         await GenomeModel.create(
             symbol="ETH_USD",
             genome_data=b"test",
             fitness=0.8,
-            trained_at=datetime.now(timezone.utc),
+            trained_at=datetime.now(UTC),
         )
         btc_genomes = await GenomeModel.filter(symbol="BTC_USD")
         assert len(btc_genomes) == 1
@@ -246,7 +247,7 @@ class TestOrderModel:
         )
         order.status = "filled"
         order.filled_qty = 0.1
-        order.filled_at = datetime.now(timezone.utc)
+        order.filled_at = datetime.now(UTC)
         await order.save()
         updated = await OrderModel.get(id=order.id)
         assert updated.status == "filled"
@@ -279,7 +280,7 @@ class TestRiskEventModel:
             threshold=0.15,
             message="Drawdown at 12%",
         )
-        event.acknowledged_at = datetime.now(timezone.utc)
+        event.acknowledged_at = datetime.now(UTC)
         event.acknowledged_by = "test_user"
         await event.save()
         updated = await RiskEventModel.get(id=event.id)

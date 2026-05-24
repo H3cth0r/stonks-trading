@@ -66,7 +66,7 @@ class IngestionOrchestrator:
         self.tigris = tigris
         self.features = feature_computer
         self._last_candle: dict[str, datetime] = {}  # symbol -> last timestamp
-        self._buffer: dict[str, list[Candle]] = {}   # symbol -> monthly buffer
+        self._buffer: dict[str, list[Candle]] = {}  # symbol -> monthly buffer
         self._running = False
         self._gap_threshold = timedelta(minutes=2)
 
@@ -242,9 +242,7 @@ class IngestionOrchestrator:
         )
 
         try:
-            candles = await self.adapter.backfill(
-                Symbol(value=symbol), start, end
-            )
+            candles = await self.adapter.backfill(Symbol(value=symbol), start, end)
             for candle in candles:
                 self._process_candle(candle)
 
@@ -325,9 +323,6 @@ class IngestionOrchestrator:
         return {
             "running": self._running,
             "symbols": list(self._last_candle.keys()),
-            "buffer_sizes": {
-                symbol: len(candles)
-                for symbol, candles in self._buffer.items()
-            },
+            "buffer_sizes": {symbol: len(candles) for symbol, candles in self._buffer.items()},
             "feature_stats": self.features.get_stats(),
         }

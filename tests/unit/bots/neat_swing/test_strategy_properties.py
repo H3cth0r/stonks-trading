@@ -4,13 +4,12 @@ Uses Hypothesis to test feature computation and signal generation
 across a wide range of randomly generated candle data.
 """
 
-from hypothesis import HealthCheck, given, settings, Verbosity
-from hypothesis import strategies as st
 import numpy as np
 import pytest
+from hypothesis import HealthCheck, Verbosity, given, settings
+from hypothesis import strategies as st
 
 from stonks_trading.bots.neat_swing.strategy import (
-    DECISION_THRESHOLD,
     NeatSwingStrategy,
 )
 from stonks_trading.domains.trading.value_objects import Symbol

@@ -10,15 +10,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from stonks_trading.domains.trading.entities import Position, RiskCheckResult
+
+if TYPE_CHECKING:
+    from stonks_trading.domains.trading.adapters import IExchangeAdapter
 from stonks_trading.domains.trading.enums import RiskLevel, Side
 from stonks_trading.domains.trading.value_objects import (
     FeeTier,
     Money,
     Symbol,
 )
-
-if TYPE_CHECKING:
-    from stonks_trading.domains.trading.adapters import IExchangeAdapter
 
 
 class RiskChecker:

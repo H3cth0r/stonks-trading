@@ -84,7 +84,10 @@ async def save_trade_with_context(trade: Trade, context: BotContext) -> Trade:
 async def save_trade(trade: Trade) -> Trade:
     """Persist trade using Tortoise ORM (legacy wrapper with default context)."""
     context = DEFAULT_CONTEXT
-    if trade.bot_type != DEFAULT_CONTEXT.bot_type or trade.bot_instance_id != DEFAULT_CONTEXT.instance_id:
+    if (
+        trade.bot_type != DEFAULT_CONTEXT.bot_type
+        or trade.bot_instance_id != DEFAULT_CONTEXT.instance_id
+    ):
         context = BotContext(bot_type=trade.bot_type, instance_id=trade.bot_instance_id)
     return await save_trade_with_context(trade, context)
 
@@ -131,10 +134,15 @@ async def list_trades_by_bot(
 
 async def list_trades(limit: int = 100, offset: int = 0) -> list[Trade]:
     """List all trades with pagination (legacy wrapper with default context)."""
-    models = await TradeModel.filter(
-        bot_type=DEFAULT_CONTEXT.bot_type,
-        bot_instance_id=DEFAULT_CONTEXT.instance_id,
-    ).offset(offset).limit(limit).order_by("-created_at")
+    models = (
+        await TradeModel.filter(
+            bot_type=DEFAULT_CONTEXT.bot_type,
+            bot_instance_id=DEFAULT_CONTEXT.instance_id,
+        )
+        .offset(offset)
+        .limit(limit)
+        .order_by("-created_at")
+    )
     return [_model_to_trade(m) for m in models]
 
 
@@ -158,7 +166,7 @@ def _model_to_trade(model: TradeModel) -> Trade:
         slippage_bps=model.slippage_bps,
         quote_quantity=model.quote_quantity,
         fee_rate=model.fee_rate,
-        mode=model.mode,
+        mode=model.mode,  # type: ignore[arg-type]
         genome_id=model.genome_id,
         entry_price=Money(amount=model.entry_price, currency=model.fee_currency)
         if model.entry_price
@@ -212,9 +220,9 @@ async def save_position_with_context(position: Position, context: BotContext) ->
     )
     if existing:
         existing.quantity = position.quantity
-        existing.entry_price = float(position.entry_price.amount) if position.entry_price else None
+        existing.entry_price = float(position.entry_price.amount) if position.entry_price else None  # type: ignore[assignment]
         existing.current_price = (
-            float(position.current_price.amount) if position.current_price else None
+            float(position.current_price.amount) if position.current_price else None  # type: ignore[assignment]
         )
         existing.unrealized_pnl = position.unrealized_pnl
         await existing.save()
@@ -236,7 +244,10 @@ async def save_position_with_context(position: Position, context: BotContext) ->
 async def save_position(position: Position) -> Position:
     """Save position (legacy wrapper with default context)."""
     context = DEFAULT_CONTEXT
-    if position.bot_type != DEFAULT_CONTEXT.bot_type or position.bot_instance_id != DEFAULT_CONTEXT.instance_id:
+    if (
+        position.bot_type != DEFAULT_CONTEXT.bot_type
+        or position.bot_instance_id != DEFAULT_CONTEXT.instance_id
+    ):
         context = BotContext(bot_type=position.bot_type, instance_id=position.bot_instance_id)
     return await save_position_with_context(position, context)
 
@@ -381,7 +392,7 @@ def _model_to_genome(model: GenomeModel) -> Genome:
     return Genome(
         id=model.id,
         genome_data=model.genome_data or b"",
-        fitness=model.fitness_score or model.fitness,
+        fitness=model.fitness_score or model.fitness,  # type: ignore[attr-defined]
         generation=0,
         symbol=Symbol(value=model.symbol) if model.symbol else None,
         model_family=model.model_family,
@@ -439,10 +450,7 @@ async def list_risk_events(
     if severity:
         query = query.filter(severity=severity)
     if acknowledged is not None:
-        if acknowledged:
-            query = query.filter(acknowledged_at__notnull=True)
-        else:
-            query = query.filter(acknowledged_at__null=True)
+        query = query.filter(acknowledged_at__isnull=not acknowledged)
     models = await query.limit(limit).order_by("-created_at")
     return [_model_to_risk_event(m) for m in models]
 
@@ -458,7 +466,7 @@ async def acknowledge_risk_event(
         return None
     model.acknowledged_at = datetime.utcnow()
     model.acknowledged_by = user
-    model.action_taken = action
+    model.action_taken = action  # type: ignore[assignment]
     await model.save()
     return _model_to_risk_event(model)
 
@@ -474,7 +482,7 @@ def _model_to_risk_event(model: RiskEventModel) -> RiskEvent:
         value=model.value,
         threshold=model.threshold,
         notified=model.notified,
-        mode=model.mode,
+        mode=model.mode,  # type: ignore[arg-type]
         metric_name=model.metric_name,
         metric_value=model.metric_value,
         portfolio_value=Money(amount=model.portfolio_value, currency="USD")
@@ -561,7 +569,7 @@ def _model_to_order(model: OrderModel) -> Order:
         symbol=Symbol(value=model.symbol),
         side=Side(model.side.value),
         quantity=model.requested_qty,
-        order_type=model.order_type,
+        order_type=model.order_type,  # type: ignore[attr-defined]
         status=model.status,
         client_order_id=model.client_order_id,
         venue_order_id=model.venue_order_id,
@@ -569,12 +577,12 @@ def _model_to_order(model: OrderModel) -> Order:
         avg_fill_price=Money(amount=model.avg_fill_price, currency="USDT")
         if model.avg_fill_price
         else None,
-        mode=model.mode,
+        mode=model.mode,  # type: ignore[arg-type]
         genome_id=model.genome_id,
-        price=Money(amount=model.price, currency="USDT") if model.price else None,
+        price=Money(amount=model.price, currency="USDT") if model.price else None,  # type: ignore[attr-defined]
         created_at=model.created_at,
         updated_at=model.updated_at,
-        filled_at=model.filled_at,
+        filled_at=model.filled_at,  # type: ignore[attr-defined]
     )
 
 
@@ -624,7 +632,7 @@ def _model_to_bot_decision(model: BotDecisionModel) -> BotDecision:
         sell_prob=model.sell_prob,
         action=model.action,
         reason=model.reason,
-        mode=model.mode,
+        mode=model.mode,  # type: ignore[arg-type]
         candle_close_at=model.candle_close_at,
         executed=model.executed,
         trade_id=model.trade_id,
@@ -700,7 +708,7 @@ def _model_to_training_run(model: TrainingRunModel) -> TrainingRun:
         pop_size=model.pop_size,
         fee_rate=model.fee_rate,
         status=model.status,
-        config_snapshot=model.config_snapshot,
+        config_snapshot=model.config_snapshot,  # type: ignore[attr-defined]
         started_at=model.started_at,
         finished_at=model.finished_at,
     )
@@ -740,7 +748,7 @@ def _model_to_generation_metric(model: GenerationMetricModel) -> GenerationMetri
     """Convert GenerationMetricModel to GenerationMetric entity."""
     return GenerationMetric(
         id=model.id,
-        run_id=model.run_id,
+        run_id=model.run_id,  # type: ignore[attr-defined]
         generation=model.generation,
         best_fitness=model.best_fitness,
         mean_fitness=model.mean_fitness,
@@ -888,7 +896,7 @@ class BotInstanceRepository:
         )
         if not model:
             return False
-        model.status = status
+        model.status = status  # type: ignore[assignment]
         await model.save()
         return True
 
@@ -951,8 +959,12 @@ class BotStateRepository:
     @staticmethod
     async def load(context: BotContext) -> dict[str, Any] | None:
         """Load most recent bot state for context."""
-        model = await BotStateModel.filter(
-            bot_type=context.bot_type,
-            bot_instance_id=context.instance_id,
-        ).order_by("-created_at").first()
+        model = (
+            await BotStateModel.filter(
+                bot_type=context.bot_type,
+                bot_instance_id=context.instance_id,
+            )
+            .order_by("-created_at")
+            .first()
+        )
         return model.state_json if model else None

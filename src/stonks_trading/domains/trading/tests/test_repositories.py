@@ -175,6 +175,9 @@ class TestPositionRepository:
     async def test_close_position_success(self, data: st.DataObject) -> None:
         """Closing position should succeed."""
         symbol = generate_fake_symbol()
+        await save_position(
+            Position(symbol=symbol, quantity=0.1, entry_price=generate_fake_money())
+        )
 
         result = await close_position(symbol)
 
@@ -196,6 +199,7 @@ class TestGenomeRepository:
             genome_data=b"test_genome",
             fitness=fake.pyfloat(min_value=-1000.0, max_value=1000.0),
             generation=fake.random_int(min=0, max=1000),
+            symbol=generate_fake_symbol(),
         )
 
         result = await save_genome(genome)
@@ -215,6 +219,7 @@ class TestGenomeRepository:
             fee_rate=fee_rate,
             slippage_bps=slippage,
             mode=mode,
+            symbol=generate_fake_symbol(),
         )
 
         result = await save_genome(genome)
@@ -254,9 +259,14 @@ class TestGenomeRepository:
     @given(st.data())
     async def test_activate_genome_success(self, data: st.DataObject) -> None:
         """Activating genome should succeed."""
-        genome_id = fake.random_int(min=1, max=100000)
+        genome = await save_genome(
+            Genome(
+                genome_data=b"test_genome",
+                symbol=generate_fake_symbol(),
+            )
+        )
 
-        result = await activate_genome(genome_id)
+        result = await activate_genome(genome.id)
 
         assert result is True
 
@@ -276,6 +286,7 @@ class TestRiskEventRepository:
             event_type=fake.random_element(["drawdown_breach", "trade_limit", "kill_switch"]),
             severity=RiskLevel.CRITICAL.value,
             message=fake.sentence(nb_words=10),
+            symbol=generate_fake_symbol(),
         )
 
         result = await save_risk_event(event)
@@ -335,5 +346,3 @@ class TestRiskEventRepository:
         result = await acknowledge_risk_event(event_id, user, action)
 
         assert result is None
-
-

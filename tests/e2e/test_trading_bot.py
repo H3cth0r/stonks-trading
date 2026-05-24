@@ -7,7 +7,7 @@ state persistence, and dry-run trade execution.
 import asyncio
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -65,7 +65,12 @@ class MockAdapter:
         from stonks_trading.domains.trading.entities import Balance
 
         if asset:
-            return Balance(asset=asset, free=self.balances.get(asset, 0), locked=0, total=self.balances.get(asset, 0))
+            return Balance(
+                asset=asset,
+                free=self.balances.get(asset, 0),
+                locked=0,
+                total=self.balances.get(asset, 0),
+            )
         return [Balance(asset=k, free=v, locked=0, total=v) for k, v in self.balances.items()]
 
     async def get_price(self, symbol: Symbol) -> Money:
@@ -170,8 +175,10 @@ class TestBotLifecycle:
     @pytest.mark.asyncio
     async def test_bot_stop_updates_status(self, bot: NeatSwingBot) -> None:
         """Test bot updates status on stop."""
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state:
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+        ):
             mock_repo.register = AsyncMock()
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
@@ -265,7 +272,6 @@ class TestBotLifecycle:
         self, bot: NeatSwingBot, mock_adapter: MockAdapter, symbol: Symbol
     ) -> None:
         """Test bot executes dry-run trades correctly."""
-        from stonks_trading.domains.trading.entities import OrderResult
 
         # Manually set a price on adapter
         mock_adapter._price = 50000.0

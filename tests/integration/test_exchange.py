@@ -5,20 +5,20 @@ Requires BINANCE_API_KEY and BINANCE_API_SECRET in environment.
 """
 
 import os
-import pytest
 from datetime import datetime
+
+import pytest
 
 from stonks_trading.domains.trading.adapters import (
     BinanceAdapter,
-    DryRunAdapter,
     BitsoAdapter,
+    DryRunAdapter,
     ExchangeAdapterFactory,
 )
-from stonks_trading.domains.trading.entities import Balance, OrderResult
+from stonks_trading.domains.trading.entities import Balance
 from stonks_trading.domains.trading.enums import Side
-from stonks_trading.domains.trading.services import RiskChecker, FeeCalculator
+from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.value_objects import Money, Symbol
-
 
 # =============================================================================
 # Fixtures

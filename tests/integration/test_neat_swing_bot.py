@@ -7,7 +7,7 @@ trade execution, and state persistence using mocked dependencies.
 import asyncio
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -64,7 +64,12 @@ class MockAdapter:
         from stonks_trading.domains.trading.entities import Balance
 
         if asset:
-            return Balance(asset=asset, free=self.balances.get(asset, 0), locked=0, total=self.balances.get(asset, 0))
+            return Balance(
+                asset=asset,
+                free=self.balances.get(asset, 0),
+                locked=0,
+                total=self.balances.get(asset, 0),
+            )
         return [Balance(asset=k, free=v, locked=0, total=v) for k, v in self.balances.items()]
 
     async def get_price(self, symbol: Symbol) -> Money:
@@ -185,13 +190,16 @@ class TestNeatSwingBotStart:
     @pytest.mark.asyncio
     async def test_start_sets_running_flag(self, bot: NeatSwingBot) -> None:
         """start() sets _running to True and calls registration."""
+
         async def break_loop():
             bot._running = False
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state, \
-             patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome, \
-             patch.object(bot, "_main_loop", side_effect=break_loop):
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome,
+            patch.object(bot, "_main_loop", side_effect=break_loop),
+        ):
             mock_repo.register = AsyncMock()
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
@@ -212,10 +220,12 @@ class TestNeatSwingBotStart:
         async def break_loop():
             bot._running = False
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state, \
-             patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome, \
-             patch.object(bot, "_main_loop", side_effect=break_loop):
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome,
+            patch.object(bot, "_main_loop", side_effect=break_loop),
+        ):
             mock_repo.register = AsyncMock()
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
@@ -235,8 +245,10 @@ class TestNeatSwingBotStop:
         """stop() sets _running to False."""
         bot._running = True
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state:
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+        ):
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
 
@@ -251,8 +263,10 @@ class TestNeatSwingBotStop:
         bot._websocket = mock_ws
         bot._running = True
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state:
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+        ):
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
 
@@ -265,8 +279,10 @@ class TestNeatSwingBotStop:
         """stop() updates bot status to 'stopped'."""
         bot._running = True
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo, \
-             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state:
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
+            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+        ):
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
 
@@ -316,9 +332,7 @@ class TestNeatSwingBotStatePersistence:
     """Tests for state persistence."""
 
     @pytest.mark.asyncio
-    async def test_persist_state_saves_to_repository(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_persist_state_saves_to_repository(self, bot: NeatSwingBot) -> None:
         """persist_state() calls BotStateRepository.save()."""
         bot.state.current_equity = 10500.0
         bot.state.trades_today = 3
@@ -338,9 +352,7 @@ class TestNeatSwingBotStatePersistence:
             assert state_arg["trades_today"] == 3
 
     @pytest.mark.asyncio
-    async def test_load_state_recovers_from_repository(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_load_state_recovers_from_repository(self, bot: NeatSwingBot) -> None:
         """load_state() recovers state from repository."""
         saved_state = {
             "positions": {},
@@ -364,9 +376,7 @@ class TestNeatSwingBotStatePersistence:
             assert recovered.peak_equity == 11000.0
 
     @pytest.mark.asyncio
-    async def test_load_state_returns_none_when_no_saved_state(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_load_state_returns_none_when_no_saved_state(self, bot: NeatSwingBot) -> None:
         """load_state() returns None if no saved state."""
         with patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_repo:
             mock_repo.load = AsyncMock(return_value=None)
@@ -380,9 +390,7 @@ class TestNeatSwingBotPositions:
     """Tests for position management."""
 
     @pytest.mark.asyncio
-    async def test_state_tracks_positions(
-        self, bot: NeatSwingBot, symbol: Symbol
-    ) -> None:
+    async def test_state_tracks_positions(self, bot: NeatSwingBot, symbol: Symbol) -> None:
         """Bot state tracks positions by symbol."""
         position = Position(
             symbol=symbol,
@@ -396,9 +404,7 @@ class TestNeatSwingBotPositions:
         assert bot.state.positions[symbol].quantity == 0.5
 
     @pytest.mark.asyncio
-    async def test_state_clears_position_on_close(
-        self, bot: NeatSwingBot, symbol: Symbol
-    ) -> None:
+    async def test_state_clears_position_on_close(self, bot: NeatSwingBot, symbol: Symbol) -> None:
         """Bot state clears position when closed."""
         position = Position(
             symbol=symbol,
@@ -416,18 +422,14 @@ class TestNeatSwingBotEquityTracking:
     """Tests for equity tracking."""
 
     @pytest.mark.asyncio
-    async def test_update_equity_tracks_current(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_update_equity_tracks_current(self, bot: NeatSwingBot) -> None:
         """Bot tracks current equity."""
         bot.state.update_equity(11000.0)
 
         assert bot.state.current_equity == 11000.0
 
     @pytest.mark.asyncio
-    async def test_update_equity_tracks_peak(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_update_equity_tracks_peak(self, bot: NeatSwingBot) -> None:
         """Bot tracks peak equity."""
         bot.state.peak_equity = 10000.0
         bot.state.update_equity(11000.0)
@@ -435,9 +437,7 @@ class TestNeatSwingBotEquityTracking:
         assert bot.state.peak_equity == 11000.0
 
     @pytest.mark.asyncio
-    async def test_update_equity_maintains_peak_on_drawdown(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_update_equity_maintains_peak_on_drawdown(self, bot: NeatSwingBot) -> None:
         """Peak equity is maintained during drawdown."""
         bot.state.peak_equity = 10000.0
         bot.state.update_equity(9000.0)
@@ -450,9 +450,7 @@ class TestNeatSwingBotTradeCounting:
     """Tests for trade counting."""
 
     @pytest.mark.asyncio
-    async def test_record_trade_increments_count(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_record_trade_increments_count(self, bot: NeatSwingBot) -> None:
         """record_trade() increments trades_today."""
         assert bot.state.trades_today == 0
 
@@ -461,9 +459,7 @@ class TestNeatSwingBotTradeCounting:
         assert bot.state.trades_today == 1
 
     @pytest.mark.asyncio
-    async def test_record_trade_sets_last_trade_time(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_record_trade_sets_last_trade_time(self, bot: NeatSwingBot) -> None:
         """record_trade() sets last_trade_time."""
         assert bot.state.last_trade_time is None
 
@@ -481,9 +477,7 @@ class TestNeatSwingBotSafeMode:
         assert bot.state.in_safe_mode is False
 
     @pytest.mark.asyncio
-    async def test_reset_daily_metrics_clears_safe_mode(
-        self, bot: NeatSwingBot
-    ) -> None:
+    async def test_reset_daily_metrics_clears_safe_mode(self, bot: NeatSwingBot) -> None:
         """reset_daily_metrics() clears safe mode."""
         bot.state.in_safe_mode = True
 
