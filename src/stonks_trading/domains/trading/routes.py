@@ -108,7 +108,7 @@ async def get_bot_context(
     Validates that the bot instance exists in the registry.
     Raises 404 if not found.
     """
-    instance = await repo.BotInstanceRepository.get(bot_type, instance_id)
+    instance = await repo.get_bot_instance(bot_type, instance_id)
     if not instance:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -623,7 +623,7 @@ async def evaluate_signal(request: NeatSignalRequest) -> NeatSignalResponse:
 )
 async def list_bots() -> BotListResponse:
     """List all registered bot instances."""
-    bots = await repo.BotInstanceRepository.list_all()
+    bots = await repo.list_all_bot_instances()
     bot_responses = BotInstanceMapper.to_response_list(bots)
     return BotListResponse(bots=bot_responses, total=len(bot_responses))
 
@@ -634,7 +634,7 @@ async def list_bots() -> BotListResponse:
 )
 async def list_bot_instances(bot_type: str) -> BotListResponse:
     """List all instances of a specific bot type."""
-    instances = await repo.BotInstanceRepository.list_by_type(bot_type)
+    instances = await repo.list_bot_instances_by_type(bot_type)
     instance_responses = BotInstanceMapper.to_response_list(instances)
     return BotListResponse(bots=instance_responses, total=len(instance_responses))
 
@@ -646,7 +646,7 @@ async def list_bot_instances(bot_type: str) -> BotListResponse:
 )
 async def register_bot(request: BotRegisterRequest) -> BotInstanceResponse:
     """Register a new bot instance."""
-    instance = await repo.BotInstanceRepository.register(
+    instance = await repo.register_bot_instance(
         bot_type=request.bot_type,
         instance_id=request.instance_id,
         symbols=request.symbols,
@@ -669,9 +669,9 @@ async def get_bot_state(
     context: BotContext = Depends(get_bot_context),  # noqa: B008
 ) -> BotStateResponse:
     """Get current state for a bot instance."""
-    state = await repo.BotStateRepository.load(context)
+    state = await repo.load_bot_state(context)
     # Get bot status from registry
-    instance = await repo.BotInstanceRepository.get(context.bot_type, context.instance_id)
+    instance = await repo.get_bot_instance(context.bot_type, context.instance_id)
     status = instance.status if instance else "unknown"
     return BotStateMapper.to_response(
         bot_type=context.bot_type,

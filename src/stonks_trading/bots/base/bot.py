@@ -103,7 +103,7 @@ class BaseBot(ABC, Generic[StateT, StrategyT]):
         """Register this bot instance with the database.
 
         Called once during initialization to persist bot metadata
-        and configuration. Should update BotInstanceRepository.
+        and configuration via register_bot_instance().
         """
         ...
 
@@ -145,7 +145,7 @@ class BaseBot(ABC, Generic[StateT, StrategyT]):
         """Save current state to database.
 
         Called periodically and on shutdown to ensure state recovery.
-        Uses BotStateRepository for persistence.
+        Uses save_bot_state() for persistence.
         """
         ...
 

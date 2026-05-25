@@ -216,15 +216,14 @@ class TestMultiBotRegistration:
         bot_b: NeatSwingBot,
     ) -> None:
         """Each bot registers with its own context."""
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo:
-            mock_repo.register = AsyncMock()
-            mock_repo.update_status = AsyncMock()
+        with patch("stonks_trading.bots.neat_swing.bot.register_bot_instance") as mock_register:
+            mock_register.return_value = AsyncMock()
 
             await bot_a.register()
             await bot_b.register()
 
             # Verify each bot registered with its own instance_id
-            calls = mock_repo.register.call_args_list
+            calls = mock_register.call_args_list
             assert calls[0].kwargs["instance_id"] == bot_a.context.instance_id
             assert calls[1].kwargs["instance_id"] == bot_b.context.instance_id
 
@@ -236,16 +235,16 @@ class TestMultiBotRegistration:
     ) -> None:
         """Each bot can update its status without affecting the other."""
         with (
-            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
-            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.update_bot_instance_status") as mock_update_status,
+            patch("stonks_trading.bots.neat_swing.bot.save_bot_state") as mock_save,
         ):
-            mock_state.save = AsyncMock()
-            mock_repo.update_status = AsyncMock()
+            mock_update_status.return_value = AsyncMock()
+            mock_save.return_value = AsyncMock()
 
             await bot_a.stop()
             await bot_b.stop()
 
-            calls = mock_repo.update_status.call_args_list
+            calls = mock_update_status.call_args_list
             # update_status is called with (bot_type, instance_id, status)
             assert calls[0].args[1] == bot_a.context.instance_id
             assert calls[0].args[2] == "stopped"
@@ -269,13 +268,13 @@ class TestMultiBotStatePersistence:
         bot_b.state.current_equity = 8000.0
         bot_b.state.trades_today = 7
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_repo:
-            mock_repo.save = AsyncMock()
+        with patch("stonks_trading.bots.neat_swing.bot.save_bot_state") as mock_save:
+            mock_save.return_value = AsyncMock()
 
             await bot_a.persist_state()
             await bot_b.persist_state()
 
-            calls = mock_repo.save.call_args_list
+            calls = mock_save.call_args_list
             # Bot A's state
             assert calls[0].args[0] == bot_a.context
             assert calls[0].args[1]["current_equity"] == 12000.0
@@ -314,14 +313,14 @@ class TestMultiBotStatePersistence:
             "last_realized_loss_time": None,
         }
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_repo:
+        with patch("stonks_trading.bots.neat_swing.bot.load_bot_state") as mock_load:
             # Return different state based on context
-            async def mock_load(context):
+            async def mock_load_side_effect(context):
                 if context.instance_id == bot_a.context.instance_id:
                     return state_a
                 return state_b
 
-            mock_repo.load = AsyncMock(side_effect=mock_load)
+            mock_load.side_effect = mock_load_side_effect
 
             recovered_a = await bot_a.load_state()
             recovered_b = await bot_b.load_state()
@@ -355,7 +354,7 @@ class TestMultiBotCandleProcessing:
             "volume": 1.5,
         }
 
-        with patch("stonks_trading.bots.neat_swing.bot.BotStateRepository"):
+        with patch("stonks_trading.bots.neat_swing.bot.load_bot_state"):
             # Both bots should accept the candle
             await bot_a.handle_candle(candle)
             await bot_b.handle_candle(candle)
@@ -490,14 +489,14 @@ class TestMultiBotScenario:
         assert bot_b.adapter.balances["BTC"] == original_btc
 
         # Both bots register themselves
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo:
-            mock_repo.register = AsyncMock()
+        with patch("stonks_trading.bots.neat_swing.bot.register_bot_instance") as mock_register:
+            mock_register.return_value = AsyncMock()
 
             await bot_a.register()
             await bot_b.register()
 
             # Both registrations succeeded with correct contexts
-            assert mock_repo.register.call_count == 2
+            assert mock_register.call_count == 2
 
     @pytest.mark.asyncio
     async def test_scenario_bot_restart_recovers_correct_state(
@@ -534,12 +533,13 @@ class TestMultiBotScenario:
         )
 
         with (
-            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
-            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.register_bot_instance") as mock_register,
+            patch("stonks_trading.bots.neat_swing.bot.load_bot_state") as mock_load,
+            patch("stonks_trading.bots.neat_swing.bot.save_bot_state") as mock_save,
         ):
-            mock_repo.register = AsyncMock()
-            mock_state.load = AsyncMock(return_value=saved_state)
-            mock_state.save = AsyncMock()
+            mock_register.return_value = AsyncMock()
+            mock_load.return_value = saved_state
+            mock_save.return_value = AsyncMock()
 
             # Load state (simulating restart)
             recovered = await bot.load_state()
@@ -553,8 +553,8 @@ class TestMultiBotScenario:
             await bot.persist_state()
 
             # Verify correct context was used
-            mock_state.save.assert_called()
-            save_call_context = mock_state.save.call_args.args[0]
+            mock_save.assert_called()
+            save_call_context = mock_save.call_args.args[0]
             assert save_call_context.instance_id == bot_a_context.instance_id
 
     @pytest.mark.asyncio

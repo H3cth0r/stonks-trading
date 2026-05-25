@@ -849,144 +849,136 @@ async def set_config(key: str, value: Any) -> SystemConfig:
 
 
 # =============================================================================
-# Bot Instance Repository (Phase 5)
+# Bot Instance Repository Functions (Phase 5)
 # =============================================================================
 
 
-class BotInstanceRepository:
-    """Repository for bot instance registry."""
+async def register_bot_instance(
+    bot_type: str,
+    instance_id: str,
+    symbols: list[str],
+    mode: str,
+    config: dict[str, Any] | None = None,
+) -> BotInstance:
+    """Register a new bot instance."""
+    model = await BotInstanceModel.create(
+        bot_type=bot_type,
+        instance_id=instance_id,
+        symbols=symbols,
+        mode=mode,
+        config=config,
+        status="stopped",
+    )
+    return BotInstance(
+        bot_type=model.bot_type,
+        instance_id=model.instance_id,
+        symbols=model.symbols,
+        mode=TradingMode(model.mode),
+        id=model.id,
+        status=model.status,
+        config=model.config,
+        last_seen_at=model.last_seen_at,
+        created_at=model.created_at,
+    )
 
-    @staticmethod
-    async def register(
-        bot_type: str,
-        instance_id: str,
-        symbols: list[str],
-        mode: str,
-        config: dict[str, Any] | None = None,
-    ) -> BotInstance:
-        """Register a new bot instance."""
-        model = await BotInstanceModel.create(
-            bot_type=bot_type,
-            instance_id=instance_id,
-            symbols=symbols,
-            mode=mode,
-            config=config,
-            status="stopped",
-        )
-        return BotInstance(
-            bot_type=model.bot_type,
-            instance_id=model.instance_id,
-            symbols=model.symbols,
-            mode=TradingMode(model.mode),
-            id=model.id,
-            status=model.status,
-            config=model.config,
-            last_seen_at=model.last_seen_at,
-            created_at=model.created_at,
-        )
 
-    @staticmethod
-    async def get(bot_type: str, instance_id: str) -> BotInstance | None:
-        """Get bot instance by type and ID."""
-        model = await BotInstanceModel.get_or_none(
-            bot_type=bot_type,
-            instance_id=instance_id,
-        )
-        if not model:
-            return None
-        return BotInstance(
-            bot_type=model.bot_type,
-            instance_id=model.instance_id,
-            symbols=model.symbols,
-            mode=TradingMode(model.mode),
-            id=model.id,
-            status=model.status,
-            config=model.config,
-            last_seen_at=model.last_seen_at,
-            created_at=model.created_at,
-        )
+async def get_bot_instance(bot_type: str, instance_id: str) -> BotInstance | None:
+    """Get bot instance by type and ID."""
+    model = await BotInstanceModel.get_or_none(
+        bot_type=bot_type,
+        instance_id=instance_id,
+    )
+    if not model:
+        return None
+    return BotInstance(
+        bot_type=model.bot_type,
+        instance_id=model.instance_id,
+        symbols=model.symbols,
+        mode=TradingMode(model.mode),
+        id=model.id,
+        status=model.status,
+        config=model.config,
+        last_seen_at=model.last_seen_at,
+        created_at=model.created_at,
+    )
 
-    @staticmethod
-    async def update_status(bot_type: str, instance_id: str, status: str) -> bool:
-        """Update bot instance status."""
-        model = await BotInstanceModel.get_or_none(
-            bot_type=bot_type,
-            instance_id=instance_id,
+
+async def update_bot_instance_status(bot_type: str, instance_id: str, status: str) -> bool:
+    """Update bot instance status."""
+    model = await BotInstanceModel.get_or_none(
+        bot_type=bot_type,
+        instance_id=instance_id,
+    )
+    if not model:
+        return False
+    model.status = status  # type: ignore[assignment]
+    await model.save()
+    return True
+
+
+async def list_all_bot_instances() -> list[BotInstance]:
+    """List all bot instances."""
+    models = await BotInstanceModel.all()
+    return [
+        BotInstance(
+            bot_type=m.bot_type,
+            instance_id=m.instance_id,
+            symbols=m.symbols,
+            mode=TradingMode(m.mode),
+            id=m.id,
+            status=m.status,
+            config=m.config,
+            last_seen_at=m.last_seen_at,
+            created_at=m.created_at,
         )
-        if not model:
-            return False
-        model.status = status  # type: ignore[assignment]
-        await model.save()
-        return True
+        for m in models
+    ]
 
-    @staticmethod
-    async def list_all() -> list[BotInstance]:
-        """List all bot instances."""
-        models = await BotInstanceModel.all()
-        return [
-            BotInstance(
-                bot_type=m.bot_type,
-                instance_id=m.instance_id,
-                symbols=m.symbols,
-                mode=TradingMode(m.mode),
-                id=m.id,
-                status=m.status,
-                config=m.config,
-                last_seen_at=m.last_seen_at,
-                created_at=m.created_at,
-            )
-            for m in models
-        ]
 
-    @staticmethod
-    async def list_by_type(bot_type: str) -> list[BotInstance]:
-        """List bot instances by type."""
-        models = await BotInstanceModel.filter(bot_type=bot_type)
-        return [
-            BotInstance(
-                bot_type=m.bot_type,
-                instance_id=m.instance_id,
-                symbols=m.symbols,
-                mode=TradingMode(m.mode),
-                id=m.id,
-                status=m.status,
-                config=m.config,
-                last_seen_at=m.last_seen_at,
-                created_at=m.created_at,
-            )
-            for m in models
-        ]
+async def list_bot_instances_by_type(bot_type: str) -> list[BotInstance]:
+    """List bot instances by type."""
+    models = await BotInstanceModel.filter(bot_type=bot_type)
+    return [
+        BotInstance(
+            bot_type=m.bot_type,
+            instance_id=m.instance_id,
+            symbols=m.symbols,
+            mode=TradingMode(m.mode),
+            id=m.id,
+            status=m.status,
+            config=m.config,
+            last_seen_at=m.last_seen_at,
+            created_at=m.created_at,
+        )
+        for m in models
+    ]
 
 
 # =============================================================================
-# Bot State Repository (Phase 5)
+# Bot State Repository Functions (Phase 5)
 # =============================================================================
 
 
-class BotStateRepository:
-    """Repository for bot state persistence."""
+async def save_bot_state(context: BotContext, state: dict[str, Any]) -> None:
+    """Save bot state for context."""
+    await BotStateModel.create(
+        bot_type=context.bot_type,
+        bot_instance_id=context.instance_id,
+        state_json=state,
+    )
 
-    @staticmethod
-    async def save(context: BotContext, state: dict[str, Any]) -> None:
-        """Save bot state for context."""
-        await BotStateModel.create(
+
+async def load_bot_state(context: BotContext) -> dict[str, Any] | None:
+    """Load most recent bot state for context."""
+    model = (
+        await BotStateModel.filter(
             bot_type=context.bot_type,
             bot_instance_id=context.instance_id,
-            state_json=state,
         )
-
-    @staticmethod
-    async def load(context: BotContext) -> dict[str, Any] | None:
-        """Load most recent bot state for context."""
-        model = (
-            await BotStateModel.filter(
-                bot_type=context.bot_type,
-                bot_instance_id=context.instance_id,
-            )
-            .order_by("-created_at")
-            .first()
-        )
-        return model.state_json if model else None
+        .order_by("-created_at")
+        .first()
+    )
+    return model.state_json if model else None
 
 
 # =============================================================================

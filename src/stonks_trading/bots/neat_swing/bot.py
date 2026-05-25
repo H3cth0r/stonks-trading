@@ -22,9 +22,11 @@ from stonks_trading.bots.neat_swing.strategy import (
 from stonks_trading.domains.trading.entities import Position
 from stonks_trading.domains.trading.enums import Side, TradingMode
 from stonks_trading.domains.trading.repositories import (
-    BotInstanceRepository,
-    BotStateRepository,
     get_active_genome,
+    load_bot_state,
+    register_bot_instance,
+    save_bot_state,
+    update_bot_instance_status,
 )
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import ExecuteBotTradeUseCase
@@ -85,7 +87,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
 
     async def register(self) -> None:
         """Register bot instance with database."""
-        await BotInstanceRepository.register(
+        await register_bot_instance(
             bot_type=self.bot_type,
             instance_id=self.context.instance_id,
             symbols=[s.value for s in self.symbols],
@@ -122,9 +124,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         )
 
         # Update status
-        await BotInstanceRepository.update_status(
-            self.bot_type, self.context.instance_id, "running"
-        )
+        await update_bot_instance_status(self.bot_type, self.context.instance_id, "running")
 
         # Run main loop
         await self._main_loop()
@@ -146,9 +146,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         await self.persist_state()
 
         # Update status
-        await BotInstanceRepository.update_status(
-            self.bot_type, self.context.instance_id, "stopped"
-        )
+        await update_bot_instance_status(self.bot_type, self.context.instance_id, "stopped")
 
     async def handle_candle(self, candle: dict[str, Any]) -> None:
         """Queue candle for processing by main loop.
@@ -161,7 +159,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
     async def persist_state(self) -> None:
         """Save current state to database."""
         state_dict = self.state.to_dict()
-        await BotStateRepository.save(self.context, state_dict)
+        await save_bot_state(self.context, state_dict)
         logger.debug(f"Persisted state for {self.context}")
 
     async def load_state(self) -> NeatSwingState | None:
@@ -170,7 +168,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         Returns:
             NeatSwingState or None if no previous state
         """
-        data = await BotStateRepository.load(self.context)
+        data = await load_bot_state(self.context)
         if data:
             return NeatSwingState.from_dict(data)
         return None

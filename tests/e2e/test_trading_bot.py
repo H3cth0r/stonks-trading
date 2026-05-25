@@ -159,14 +159,13 @@ class TestBotLifecycle:
     @pytest.mark.asyncio
     async def test_bot_registration(self, bot: NeatSwingBot) -> None:
         """Test bot registers itself on start."""
-        with patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo:
-            mock_repo.register = AsyncMock()
-            mock_repo.update_status = AsyncMock()
+        with patch("stonks_trading.bots.neat_swing.bot.register_bot_instance") as mock_register:
+            mock_register.return_value = AsyncMock()
 
             await bot.register()
 
-            mock_repo.register.assert_called_once()
-            call_kwargs = mock_repo.register.call_args[1]
+            mock_register.assert_called_once()
+            call_kwargs = mock_register.call_args[1]
             assert call_kwargs["bot_type"] == "neat_swing"
             assert call_kwargs["instance_id"] == "test-bot-1"
             assert call_kwargs["symbols"] == ["BTC_USD"]
@@ -176,16 +175,15 @@ class TestBotLifecycle:
     async def test_bot_stop_updates_status(self, bot: NeatSwingBot) -> None:
         """Test bot updates status on stop."""
         with (
-            patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
-            patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.update_bot_instance_status") as mock_update_status,
+            patch("stonks_trading.bots.neat_swing.bot.save_bot_state") as mock_save,
         ):
-            mock_repo.register = AsyncMock()
-            mock_repo.update_status = AsyncMock()
-            mock_state.save = AsyncMock()
+            mock_update_status.return_value = AsyncMock()
+            mock_save.return_value = AsyncMock()
 
             await bot.stop()
 
-            mock_repo.update_status.assert_called_with("neat_swing", "test-bot-1", "stopped")
+            mock_update_status.assert_called_with("neat_swing", "test-bot-1", "stopped")
 
     @pytest.mark.asyncio
     async def test_handle_candle_queues_message(self, bot: NeatSwingBot) -> None:
@@ -209,8 +207,8 @@ class TestBotLifecycle:
     @pytest.mark.asyncio
     async def test_state_persistence(self, bot: NeatSwingBot) -> None:
         """Test state is persisted correctly."""
-        with patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_repo:
-            mock_repo.save = AsyncMock()
+        with patch("stonks_trading.bots.neat_swing.bot.save_bot_state") as mock_save:
+            mock_save.return_value = AsyncMock()
 
             # Update state
             bot.state.current_equity = 10500.0
@@ -218,8 +216,8 @@ class TestBotLifecycle:
 
             await bot.persist_state()
 
-            mock_repo.save.assert_called_once()
-            call_args = mock_repo.save.call_args
+            mock_save.assert_called_once()
+            call_args = mock_save.call_args
             # save is called with positional args: (context, state_dict)
             context_arg = call_args[0][0]
             state_arg = call_args[0][1]
@@ -231,19 +229,17 @@ class TestBotLifecycle:
     @pytest.mark.asyncio
     async def test_state_recovery(self, bot: NeatSwingBot) -> None:
         """Test bot recovers state on startup."""
-        with patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_repo:
-            mock_repo.load = AsyncMock(
-                return_value={
-                    "positions": {},
-                    "trades_today": 5,
-                    "last_trade_time": datetime.utcnow().isoformat(),
-                    "peak_equity": 11000.0,
-                    "current_equity": 10500.0,
-                    "daily_loss_pct": 0.01,
-                    "in_safe_mode": False,
-                    "last_realized_loss_time": None,
-                }
-            )
+        with patch("stonks_trading.bots.neat_swing.bot.load_bot_state") as mock_load:
+            mock_load.return_value = {
+                "positions": {},
+                "trades_today": 5,
+                "last_trade_time": datetime.utcnow().isoformat(),
+                "peak_equity": 11000.0,
+                "current_equity": 10500.0,
+                "daily_loss_pct": 0.01,
+                "in_safe_mode": False,
+                "last_realized_loss_time": None,
+            }
 
             recovered_state = await bot.load_state()
 
@@ -257,7 +253,7 @@ class TestBotLifecycle:
         self, bot: NeatSwingBot, mock_adapter: MockAdapter
     ) -> None:
         """Test bot processes candles from WebSocket."""
-        with patch("stonks_trading.bots.neat_swing.bot.BotStateRepository"):
+        with patch("stonks_trading.bots.neat_swing.bot.load_bot_state"):
             mock_ws = MockWebSocket(bot)
 
             # Send some candles

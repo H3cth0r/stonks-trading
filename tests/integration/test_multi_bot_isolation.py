@@ -18,8 +18,12 @@ from stonks_trading.bots.base.context import BotContext
 from stonks_trading.domains.trading.entities import Position, Trade
 from stonks_trading.domains.trading.enums import Side, TradingMode
 from stonks_trading.domains.trading.repositories import (
-    BotInstanceRepository,
-    BotStateRepository,
+    register_bot_instance,
+    get_bot_instance,
+    list_all_bot_instances,
+    list_bot_instances_by_type,
+    save_bot_state,
+    load_bot_state,
     close_position_by_bot,
     get_position_by_bot_and_symbol,
     list_positions_by_bot,
@@ -186,12 +190,12 @@ class TestBotStateIsolation:
         with patch("stonks_trading.domains.trading.repositories.BotStateModel") as mock_model:
             mock_model.create = AsyncMock()
 
-            await BotStateRepository.save(bot_a_context, state_a)
+            await save_bot_state(bot_a_context, state_a)
             create_kwargs_a = mock_model.create.call_args.kwargs
             assert create_kwargs_a["bot_type"] == bot_a_context.bot_type
             assert create_kwargs_a["bot_instance_id"] == bot_a_context.instance_id
 
-            await BotStateRepository.save(bot_b_context, state_b)
+            await save_bot_state(bot_b_context, state_b)
             create_kwargs_b = mock_model.create.call_args.kwargs
             assert create_kwargs_b["bot_type"] == bot_b_context.bot_type
             assert create_kwargs_b["bot_instance_id"] == bot_b_context.instance_id
@@ -219,7 +223,7 @@ class TestBotInstanceIsolation:
             mock_instance.created_at = datetime.utcnow()
             mock_model.create = AsyncMock(return_value=mock_instance)
 
-            await BotInstanceRepository.register(
+            await register_bot_instance(
                 bot_type=bot_a_context.bot_type,
                 instance_id=bot_a_context.instance_id,
                 symbols=["BTC_USD"],
@@ -235,11 +239,11 @@ class TestBotInstanceIsolation:
         self,
         bot_a_context: BotContext,
     ) -> None:
-        """BotInstanceRepository.get returns only the specific bot."""
+        """get_bot_instance returns only the specific bot."""
         with patch("stonks_trading.domains.trading.repositories.BotInstanceModel") as mock_model:
             mock_model.get_or_none = AsyncMock(return_value=None)
 
-            await BotInstanceRepository.get(
+            await get_bot_instance(
                 bot_type=bot_a_context.bot_type,
                 instance_id=bot_a_context.instance_id,
             )
@@ -251,11 +255,11 @@ class TestBotInstanceIsolation:
 
     @pytest.mark.asyncio
     async def test_list_all_returns_all_bots(self) -> None:
-        """BotInstanceRepository.list_all returns all registered bots."""
+        """list_all_bot_instances returns all registered bots."""
         with patch("stonks_trading.domains.trading.repositories.BotInstanceModel") as mock_model:
             mock_model.all = AsyncMock(return_value=[])
 
-            await BotInstanceRepository.list_all()
+            await list_all_bot_instances()
 
             mock_model.all.assert_called_once()
 
@@ -268,7 +272,7 @@ class TestBotInstanceIsolation:
         with patch("stonks_trading.domains.trading.repositories.BotInstanceModel") as mock_model:
             mock_model.filter = AsyncMock(return_value=[])
 
-            await BotInstanceRepository.list_by_type(bot_a_context.bot_type)
+            await list_bot_instances_by_type(bot_a_context.bot_type)
 
             mock_model.filter.assert_called_with(bot_type=bot_a_context.bot_type)
 
