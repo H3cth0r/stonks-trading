@@ -160,6 +160,7 @@ async def test_duckdb_prune(duckdb: DuckDBClient) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)  # These tests need 200+ hours of candles (12,000+)
 async def test_feature_computer(sample_candles: list[Candle]) -> None:
     """Test live feature computer produces features."""
     computer = LiveFeatureComputer(window_hours=200)
@@ -180,6 +181,7 @@ async def test_feature_computer(sample_candles: list[Candle]) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)  # These tests need 200+ hours of candles (12,000+)
 async def test_feature_parity(sample_candles: list[Candle]) -> None:
     """Verify live features match training features."""
     import pandas as pd

@@ -54,6 +54,11 @@ class WebSocketClient:
         """
         self._bot_callbacks.append(callback)
 
+    @property
+    def is_connected(self) -> bool:
+        """Check if WebSocket is connected."""
+        return self._running and self._connection is not None
+
     async def connect(self) -> None:
         """Establish WebSocket connection."""
         self._running = True
