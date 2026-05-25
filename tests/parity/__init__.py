@@ -20,4 +20,21 @@ Default parameters for parity (must match NEAT/main.py):
 - initial_capital: 10000.0
 - decision_threshold: 0.6
 - min_trade_interval: 15
+
+Parity Guarantees:
+==================
+The following components are guaranteed to produce identical results
+(within 1% tolerance) to NEAT/main.py when using default parameters:
+
+1. TradingEnv.step() - Trading logic parity
+2. TradingEnv.get_state() - State vector construction
+3. calculate_fitness() - Fitness score calculation
+4. NEAT config - Network architecture and evolution parameters
+
+Dry-Run vs Backtest Verification:
+==================================
+Tests verify that:
+- dry_run mode produces worse results than backtest mode
+- Slippage impact is measurable (at least 1% difference in most cases)
+- This validates realistic simulation vs idealized backtesting
 """

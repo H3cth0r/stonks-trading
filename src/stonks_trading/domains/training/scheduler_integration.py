@@ -192,7 +192,27 @@ class TrainingScheduler:
         config = self._jobs[job_id]
         logger.info(f"Executing retraining job {job_id} for {config.bot_context}")
 
+        # Get notifier with bot context
+        notifier = (
+            self._notifier.with_bot_context(
+                config.bot_context.bot_type,
+                config.bot_context.instance_id,
+            )
+            if self._notifier
+            else None
+        )
+
         try:
+            # Send start notification
+            if notifier:
+                await notifier.send_retraining_start(
+                    symbols=config.symbols,
+                    config={
+                        "generations": config.generations,
+                        "population_size": config.population_size,
+                    },
+                )
+
             # Build jobs for each symbol
             jobs: list[RetrainingJob] = []
             for symbol in config.symbols:
@@ -217,22 +237,12 @@ class TrainingScheduler:
                 training_executor=training_executor,
                 genome_evaluator=genome_evaluator,
                 data_provider=data_provider,
-                notifier=self._notifier.with_bot_context(
-                    config.bot_context.bot_type,
-                    config.bot_context.instance_id,
-                )
-                if self._notifier
-                else None,
+                notifier=notifier,
             )
 
             daily_use_case = DailyRetrainingUseCase(
                 train_use_case=train_use_case,
-                notifier=self._notifier.with_bot_context(
-                    config.bot_context.bot_type,
-                    config.bot_context.instance_id,
-                )
-                if self._notifier
-                else None,
+                notifier=notifier,
             )
 
             # Execute retraining
@@ -253,15 +263,29 @@ class TrainingScheduler:
                 for r in results
             ]
 
+            # Send completion notification with results
+            if notifier:
+                await notifier.send_retraining_complete(results=results_dict)
+
+                # Send individual genome comparison notifications
+                for result in results_dict:
+                    await notifier.send_genome_comparison(
+                        symbol=result["symbol"],
+                        new_genome_id=result["new_genome_id"],
+                        prev_genome_id=result["prev_genome_id"],
+                        new_roi=result["new_roi"],
+                        prev_roi=result["prev_roi"],
+                        improvement_pct=result["improvement_pct"],
+                        swapped=result["improved"],
+                    )
+
             logger.info(f"Retraining job {job_id} completed: {len(results)} results")
             return results_dict
 
         except Exception as e:
             logger.error(f"Retraining job {job_id} failed: {e}")
-            if self._notifier:
-                await self._notifier.send_message(
-                    f"Retraining failed for {config.bot_context}: {e}"
-                )
+            if notifier:
+                await notifier.send_message(f"❌ Retraining failed for {config.bot_context}: {e}")
             raise
 
     def _generate_job_id(self, bot_context: BotContext) -> str:
