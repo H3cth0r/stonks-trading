@@ -123,14 +123,14 @@ class TestBacktestResult:
         )
 
         # Drawdown within acceptable range (15%)
-        assert result.has_acceptable_drawdown() is True
+        assert result.has_acceptable_drawdown(max_dd=15.0) is True
 
         # Drawdown exceeding threshold
         result.max_drawdown_pct = -20.0
-        assert result.has_acceptable_drawdown() is False
+        assert result.has_acceptable_drawdown(max_dd=15.0) is False
 
-        # Custom threshold
-        assert result.has_acceptable_drawdown(max_dd=0.25) is True
+        # Custom threshold (25%)
+        assert result.has_acceptable_drawdown(max_dd=25.0) is True
 
 
 class TestBacktestMetrics:
