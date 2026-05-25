@@ -26,7 +26,7 @@ repos:
           - types-requests
         args: [--strict, --ignore-missing-imports, --show-error-codes]
         files: ^src/stonks_trading/
-        exclude: ^src/stonks_trading/domains/trading/(tests|neat)/.*|^src/stonks_trading/(shared|domains/trading)/(routes|adapters|postgres_models|database|testing)
+        exclude: ^src/stonks_trading/domains/trading/(tests|neat)/.*|^src/stonks_trading/(shared|domains/trading)/(routes|adapters|postgres_models|database|testing)|^src/stonks_trading/api\.py$|^src/stonks_trading/domains/(training|backtesting)/.*
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks

@@ -198,6 +198,7 @@ class TestNeatSwingBotStart:
             patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
             patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome,
+            patch("stonks_trading.bots.neat_swing.bot.get_scheduler_hook") as mock_scheduler,
             patch.object(bot, "_main_loop", side_effect=break_loop),
         ):
             mock_repo.register = AsyncMock()
@@ -205,6 +206,7 @@ class TestNeatSwingBotStart:
             mock_state.save = AsyncMock()
             mock_state.load = AsyncMock(return_value=None)
             mock_genome.return_value = None
+            mock_scheduler.return_value = AsyncMock()
 
             await bot.start()
 
@@ -224,6 +226,7 @@ class TestNeatSwingBotStart:
             patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
             patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome,
+            patch("stonks_trading.bots.neat_swing.bot.get_scheduler_hook") as mock_scheduler,
             patch.object(bot, "_main_loop", side_effect=break_loop),
         ):
             mock_repo.register = AsyncMock()
@@ -231,6 +234,7 @@ class TestNeatSwingBotStart:
             mock_state.save = AsyncMock()
             mock_state.load = AsyncMock(return_value=None)
             mock_genome.return_value = None
+            mock_scheduler.return_value = AsyncMock()
 
             await bot.start()
 
@@ -248,9 +252,11 @@ class TestNeatSwingBotStop:
         with (
             patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.get_scheduler_hook") as mock_scheduler,
         ):
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
+            mock_scheduler.return_value = AsyncMock()
 
             await bot.stop()
 
@@ -266,9 +272,11 @@ class TestNeatSwingBotStop:
         with (
             patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.get_scheduler_hook") as mock_scheduler,
         ):
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
+            mock_scheduler.return_value = AsyncMock()
 
             await bot.stop()
 
@@ -282,9 +290,11 @@ class TestNeatSwingBotStop:
         with (
             patch("stonks_trading.bots.neat_swing.bot.BotInstanceRepository") as mock_repo,
             patch("stonks_trading.bots.neat_swing.bot.BotStateRepository") as mock_state,
+            patch("stonks_trading.bots.neat_swing.bot.get_scheduler_hook") as mock_scheduler,
         ):
             mock_repo.update_status = AsyncMock()
             mock_state.save = AsyncMock()
+            mock_scheduler.return_value = AsyncMock()
 
             await bot.stop()
 

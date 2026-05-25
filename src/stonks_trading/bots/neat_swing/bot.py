@@ -13,6 +13,7 @@ from typing import Any
 
 from stonks_trading.bots import BotRegistry
 from stonks_trading.bots.base.bot import BaseBot
+from stonks_trading.bots.neat_swing.scheduler_hook import get_scheduler_hook
 from stonks_trading.bots.neat_swing.state import NeatSwingState
 from stonks_trading.bots.neat_swing.strategy import (
     MIN_TRADE_INTERVAL,
@@ -113,6 +114,13 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         if self._websocket:
             await self._websocket.connect()
 
+        # Start scheduler hook for daily retraining
+        scheduler_hook = get_scheduler_hook()
+        await scheduler_hook.on_bot_start(
+            bot_context=self.context,
+            symbols=[s.value for s in self.symbols],
+        )
+
         # Update status
         await BotInstanceRepository.update_status(
             self.bot_type, self.context.instance_id, "running"
@@ -129,6 +137,10 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         # Disconnect WebSocket
         if self._websocket:
             await self._websocket.disconnect()
+
+        # Stop scheduler hook for daily retraining
+        scheduler_hook = get_scheduler_hook()
+        await scheduler_hook.on_bot_stop(self.context)
 
         # Persist state
         await self.persist_state()
