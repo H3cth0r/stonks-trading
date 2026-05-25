@@ -91,6 +91,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.2.0",
     "hypothesis>=6.98.0",
     "faker>=23.0.0",
     "mypy>=1.8.0",
@@ -233,7 +234,8 @@ ignore_errors = true
 testpaths = ["tests", "src/stonks_trading/domains/trading/tests"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --timeout=60"
+timeout = 60
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::UserWarning",

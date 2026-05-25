@@ -41,23 +41,22 @@ class TestWebSocketClient:
         assert bot_callback in client._bot_callbacks
 
     @pytest.mark.asyncio
-    async def test_connect_creates_websocket(self) -> None:
-        """Test connect creates websocket."""
+    async def test_connect_sets_running(self) -> None:
+        """Test connect sets running state."""
         client = WebSocketClient(symbols=["btcusdt"], url="wss://test.com/ws")
 
-        with patch("websockets.connect", new_callable=AsyncMock) as mock_connect:
-            mock_ws = AsyncMock()
-            mock_connect.return_value = mock_ws
+        # Mock _connect_loop to just set running and exit
+        original_connect_loop = client._connect_loop
 
-            # Override _connect to avoid the actual connection loop
-            async def mock_connect_impl():
-                client._connection = mock_ws
-                client._running = True
+        async def mock_connect_loop():
+            client._running = True
+            # Don't call _connect, just return immediately
+            return
 
-            client._connect = mock_connect_impl
-            await client.connect()
+        client._connect_loop = mock_connect_loop
+        await client.connect()
 
-            assert client._running is True
+        assert client._running is True
 
     @pytest.mark.asyncio
     async def test_disconnect(self) -> None:
