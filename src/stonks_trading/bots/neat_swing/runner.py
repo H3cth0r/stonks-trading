@@ -21,6 +21,7 @@ from stonks_trading.bots.base.context import BotContext
 from stonks_trading.bots.neat_swing.bot import NeatSwingBot
 from stonks_trading.bots.neat_swing.state import NeatSwingState
 from stonks_trading.bots.neat_swing.strategy import NeatSwingStrategy
+from stonks_trading.bots.startup import run_startup_recovery
 from stonks_trading.domains.trading.adapters import DryRunAdapter
 from stonks_trading.domains.trading.enums import TradingMode
 from stonks_trading.domains.trading.value_objects import Symbol
@@ -82,6 +83,12 @@ def parse_args(args: list[str] | None = None) -> dict[str, Any]:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level",
     )
+    parser.add_argument(
+        "--skip-recovery",
+        action="store_true",
+        default=False,
+        help="Skip startup recovery (for testing)",
+    )
 
     parsed = parser.parse_args(args)
 
@@ -91,6 +98,7 @@ def parse_args(args: list[str] | None = None) -> dict[str, Any]:
         "instance_id": parsed.instance_id,
         "config_path": parsed.config_path,
         "log_level": parsed.log_level,
+        "skip_recovery": parsed.skip_recovery,
     }
 
 
@@ -99,6 +107,7 @@ async def run_bot(
     mode: str,
     instance_id: str,
     config_path: str,
+    skip_recovery: bool = False,
 ) -> None:
     """Initialize and run the trading bot.
 
@@ -107,7 +116,19 @@ async def run_bot(
         mode: Trading mode (dry_run or live)
         instance_id: Bot instance identifier
         config_path: Path to NEAT config
+        skip_recovery: If True, skip startup recovery
     """
+    # Run startup recovery before creating bot
+    recovery_report = await run_startup_recovery(skip_recovery=skip_recovery)
+    if recovery_report.errors:
+        logger.warning(f"Startup recovery had errors: {recovery_report.errors}")
+    else:
+        logger.info(
+            f"Startup recovery complete: "
+            f"DuckDB rebuilt={recovery_report.duckdb_rebuilt}, "
+            f"Bots recovered={recovery_report.bots_recovered}"
+        )
+
     # Create bot context
     context = BotContext(bot_type="neat_swing", instance_id=instance_id)
 
@@ -217,6 +238,7 @@ def main() -> None:
                 mode=args["mode"],
                 instance_id=args["instance_id"],
                 config_path=args["config_path"],
+                skip_recovery=args["skip_recovery"],
             )
         )
     except KeyboardInterrupt:
