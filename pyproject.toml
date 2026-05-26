@@ -202,6 +202,10 @@ module = "stonks_trading.domains.backtesting.routes"
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = "stonks_trading.domains.health.routes"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
 module = "stonks_trading.api"
 ignore_errors = true
 
@@ -283,6 +287,10 @@ ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = "stonks_trading.domains.trading.repositories"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "stonks_trading.domains.health.repositories"
 ignore_errors = true
 
 [[tool.mypy.overrides]]

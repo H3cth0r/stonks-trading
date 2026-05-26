@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from tortoise.contrib.fastapi import register_tortoise
 
 from stonks_trading.domains.backtesting.routes import router as backtest_router
+from stonks_trading.domains.health.routes import get_health_router
 from stonks_trading.domains.trading.routes import get_trading_router
 from stonks_trading.domains.training.routes import router as training_router
 from stonks_trading.shared.config import settings
@@ -21,10 +22,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    # Health check (inline — no extra file needed)
-    @app.get("/health")
-    async def health_check() -> dict[str, str]:
-        return {"status": "healthy", "version": "0.1.0"}
+    # Health monitoring router (Phase 9A)
+    # Includes /health, /health/ready, /health/bots, /health/heartbeat
+    app.include_router(get_health_router())
 
     # Domain routers
     app.include_router(get_trading_router(), prefix="/api/v1", tags=["trading"])

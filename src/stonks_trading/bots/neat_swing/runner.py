@@ -11,6 +11,7 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import logging
 import signal
 import sys
@@ -161,12 +162,33 @@ async def run_bot(
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(bot, scheduler)))
 
+    # Start heartbeat task
+    heartbeat_task = asyncio.create_task(heartbeat_loop(bot))
+
     try:
         logger.info(f"Starting bot {context} with symbols {symbols} in {mode} mode")
         await bot.start()
     except Exception as e:
         logger.error(f"Bot error: {e}")
         raise
+    finally:
+        # Cancel heartbeat on exit
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
+
+
+async def heartbeat_loop(bot: NeatSwingBot) -> None:
+    """Background task that sends periodic heartbeats.
+
+    Runs every 60 seconds while bot is running.
+    """
+    while bot._running:
+        try:
+            await bot.heartbeat()
+        except Exception as e:
+            logger.warning(f"Heartbeat failed: {e}")
+        await asyncio.sleep(60)
 
 
 async def shutdown(bot: NeatSwingBot, scheduler: Scheduler) -> None:

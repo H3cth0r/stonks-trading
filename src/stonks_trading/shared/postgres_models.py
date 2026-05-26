@@ -375,3 +375,23 @@ class BotStateModel(Model):
     class Meta:
         table = "bot_states"
         indexes = (("bot_type", "bot_instance_id"),)
+
+
+# =============================================================================
+# Bot Heartbeat Model (Phase 9A)
+# =============================================================================
+
+
+class BotHeartbeatModel(Model):
+    """Bot heartbeat for health monitoring."""
+
+    id = fields.BigIntField(pk=True)
+    bot_type = fields.CharField(max_length=50, index=True)
+    bot_instance_id = fields.CharField(max_length=100, index=True)
+    timestamp = fields.DatetimeField(auto_now_add=True, index=True)
+    state_hash = fields.CharField(max_length=64, null=True)
+    candle_timestamp = fields.DatetimeField(null=True)
+
+    class Meta:
+        table = "bot_heartbeats"
+        indexes = (("bot_type", "bot_instance_id", "timestamp"),)

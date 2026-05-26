@@ -8,7 +8,9 @@ Implements the live trading bot for NEAT swing strategy with:
 """
 
 import asyncio
+import hashlib
 import logging
+from datetime import datetime
 from typing import Any
 
 from stonks_trading.bots import BotRegistry
@@ -19,6 +21,7 @@ from stonks_trading.bots.neat_swing.strategy import (
     MIN_TRADE_INTERVAL,
     NeatSwingStrategy,
 )
+from stonks_trading.domains.health.use_cases import RecordHeartbeatUseCase
 from stonks_trading.domains.trading.entities import Position
 from stonks_trading.domains.trading.enums import Side, TradingMode
 from stonks_trading.domains.trading.repositories import (
@@ -195,6 +198,13 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                 if symbol not in self.strategy.networks:
                     logger.debug(f"No network for {symbol}, skipping")
                     continue
+
+                # Update last candle timestamp for heartbeat
+                if "timestamp" in candle:
+                    candle_ts = candle["timestamp"]
+                    if isinstance(candle_ts, str):
+                        candle_ts = datetime.fromisoformat(candle_ts.replace("Z", "+00:00"))
+                    self.strategy.update_last_candle_timestamp(symbol, candle_ts)
 
                 # Build state vector and get decision
                 state_vector = self._build_state_vector(symbol, candle)
@@ -383,3 +393,46 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             websocket: WebSocket client instance
         """
         self._websocket = websocket
+
+    async def heartbeat(self) -> None:
+        """Send periodic heartbeat for health monitoring.
+
+        Called by runner every 60 seconds to indicate the bot
+        is alive and processing data.
+        """
+        try:
+            # Compute state hash from current state
+            state_hash = self._compute_state_hash()
+
+            # Get last candle timestamp from strategy if available
+            last_candle_ts = None
+            if self.symbols:
+                # Try to get the most recent candle timestamp from strategy
+                symbol = self.symbols[0]
+                last_candle_ts = self.strategy.get_last_candle_timestamp(symbol)
+
+            use_case = RecordHeartbeatUseCase()
+            await use_case.execute(
+                context=self.context,
+                state_hash=state_hash,
+                candle_timestamp=last_candle_ts,
+            )
+            logger.debug(f"Heartbeat sent for {self.context}")
+        except Exception as e:
+            logger.warning(f"Failed to send heartbeat: {e}")
+
+    def _compute_state_hash(self) -> str:
+        """Compute hash of current bot state for integrity.
+
+        Returns:
+            Hex string hash of key state values
+        """
+        state_parts = [
+            self.context.bot_type,
+            self.context.instance_id,
+            str(self.state.current_equity),
+            str(len(self.state.positions)),
+            str(self.state.trades_today),
+        ]
+        state_str = "|".join(state_parts)
+        return hashlib.sha256(state_str.encode()).hexdigest()[:16]

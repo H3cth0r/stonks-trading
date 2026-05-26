@@ -159,3 +159,13 @@ class BaseBot(ABC, Generic[StateT, StrategyT]):
             Reconstructed state or None if no previous state.
         """
         ...
+
+    @abstractmethod
+    async def heartbeat(self) -> None:
+        """Send periodic heartbeat for health monitoring.
+
+        Called by the runner every 60 seconds to indicate the bot
+        is alive and healthy. Should record heartbeat via
+        RecordHeartbeatUseCase with state hash and last candle timestamp.
+        """
+        ...
