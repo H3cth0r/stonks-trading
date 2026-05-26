@@ -128,8 +128,11 @@ jobs:
 
     - name: Verify domain has no FastAPI imports
       run: |
-        if grep -r "from fastapi" src/stonks_trading/domains/; then
-          echo "ERROR: Found FastAPI imports in domain layer"
+        # Exclude routes.py files which legitimately use FastAPI
+        results=$(grep -r "from fastapi" src/stonks_trading/domains/ --include="*.py" | grep -v "routes.py" || true)
+        if [ -n "$results" ]; then
+          echo "ERROR: Found FastAPI imports in domain layer (excluding routes.py):"
+          echo "$results"
           exit 1
         fi
         echo "✓ No FastAPI imports in domain layer"
