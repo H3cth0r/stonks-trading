@@ -81,6 +81,37 @@ services:
     networks:
       - stonks-network
 
+  # Redis: Phase 10A - live visualization infrastructure
+  # Required for real-time equity charts and WebSocket support (Phase 10E)
+  redis:
+    image: redis:7-alpine
+    container_name: stonks-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - stonks-network
+
+  # Redis Commander: Web UI for Redis debugging (dev only)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: stonks-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - stonks-network
+
   # API Service for Phase 3 testing
   api:
     build:
@@ -91,6 +122,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgres://stonks:stonks@postgres:5432/stonks_trading
+      - REDIS_URL=redis://redis:6379/0
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - LOG_LEVEL=DEBUG
@@ -98,6 +130,8 @@ services:
       - ../src:/app/src:ro  # Mount source for development
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - stonks-network
@@ -166,6 +200,8 @@ volumes:
   minio_data:
     driver: local
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:

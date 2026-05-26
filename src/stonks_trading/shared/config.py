@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgres://user:pass@localhost/stonks_trading"
 
+    # Redis (Phase 10A - live visualization infrastructure)
+    redis_url: str = "redis://localhost:6379/0"
+    live_data_ttl_seconds: int = 3600
+    equity_history_max_points: int = 10000
+
     # Trading
     mode: str = "dry_run"  # "backtest", "dry_run", "live"
     symbols: str = "BTCUSDT,ETHUSDT,XRPUSDT"
