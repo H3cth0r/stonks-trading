@@ -34,6 +34,8 @@ from stonks_trading.domains.trading.repositories import (
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import ExecuteBotTradeUseCase
 from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.logger import clear_bot_context, set_bot_context
+from stonks_trading.shared.metrics import MetricsExporter
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +105,9 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         """Start the bot main loop."""
         self._running = True
 
+        # Set bot context for logging
+        set_bot_context(self.bot_type, self.context.instance_id)
+
         # Register with database
         await self.register()
 
@@ -150,6 +155,9 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
 
         # Update status
         await update_bot_instance_status(self.bot_type, self.context.instance_id, "stopped")
+
+        # Clear bot context from logs
+        clear_bot_context()
 
     async def handle_candle(self, candle: dict[str, Any]) -> None:
         """Queue candle for processing by main loop.
@@ -223,6 +231,41 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                             + (trade.realized_pnl.amount if trade.realized_pnl else 0)
                         )
                         await self.persist_state()
+
+                        # Instrument metrics
+                        MetricsExporter.increment_bot_trades(
+                            bot_type=self.bot_type,
+                            bot_instance_id=self.context.instance_id,
+                            symbol=symbol.value,
+                            side=action.value,
+                        )
+                        MetricsExporter.set_bot_equity(
+                            bot_type=self.bot_type,
+                            bot_instance_id=self.context.instance_id,
+                            equity_usd=self.state.current_equity,
+                        )
+                        # Calculate drawdown from peak and current equity
+                        drawdown_pct = 0.0
+                        if self.state.peak_equity > 0:
+                            drawdown_pct = (
+                                (self.state.peak_equity - self.state.current_equity)
+                                / self.state.peak_equity
+                                * 100
+                            )
+                        MetricsExporter.set_bot_drawdown(
+                            bot_type=self.bot_type,
+                            bot_instance_id=self.context.instance_id,
+                            drawdown_pct=drawdown_pct,
+                        )
+                        position = self.state.positions.get(symbol)
+                        if position:
+                            MetricsExporter.set_bot_position(
+                                bot_type=self.bot_type,
+                                bot_instance_id=self.context.instance_id,
+                                symbol=symbol.value,
+                                quantity=position.quantity,
+                            )
+
                         logger.info(f"Executed {action.value} for {symbol} at {candle['close']}")
 
             except TimeoutError:

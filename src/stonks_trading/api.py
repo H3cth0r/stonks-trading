@@ -5,6 +5,7 @@ Future domains register their routers here (e.g. domains.portfolio.routes).
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import Response
 from tortoise.contrib.fastapi import register_tortoise
 
 from stonks_trading.domains.backtesting.routes import router as backtest_router
@@ -14,6 +15,7 @@ from stonks_trading.domains.trading.routes import get_trading_router
 from stonks_trading.domains.training.routes import router as training_router
 from stonks_trading.shared.config import settings
 from stonks_trading.shared.database import TORTOISE_ORM
+from stonks_trading.shared.metrics import MetricsExporter
 
 
 def create_app() -> FastAPI:
@@ -27,6 +29,13 @@ def create_app() -> FastAPI:
     # Health monitoring router (Phase 9A)
     # Includes /health, /health/ready, /health/bots, /health/heartbeat
     app.include_router(get_health_router())
+
+    # Metrics endpoint (Phase 9D)
+    @app.get("/metrics")
+    async def metrics_endpoint() -> Response:
+        """Prometheus metrics endpoint."""
+        data, content_type = MetricsExporter.get_metrics()
+        return Response(content=data, media_type=content_type)
 
     # Domain routers
     app.include_router(get_trading_router(), prefix="/api/v1", tags=["trading"])

@@ -611,5 +611,148 @@ class DiscordNotifier:
             embeds=[embed],
         )
 
+    async def send_deploy_notification(
+        self,
+        version: str,
+        environment: str,
+        status: str,
+    ) -> bool:
+        """Send deployment notification.
+
+        Args:
+            version: Application version deployed
+            environment: Deployment environment (dev, staging, production)
+            status: Deployment status (started, complete, failed)
+
+        Returns:
+            True if message sent successfully
+        """
+        status_colors = {
+            "started": 0x3498DB,  # Blue
+            "complete": 0x00FF00,  # Green
+            "failed": 0xFF0000,  # Red
+        }
+        status_emojis = {
+            "started": "🚀",
+            "complete": "✅",
+            "failed": "❌",
+        }
+
+        color = status_colors.get(status.lower(), 0x808080)
+        emoji = status_emojis.get(status.lower(), "📦")
+
+        embed = {
+            "title": f"{emoji} Deployment {status.upper()}",
+            "description": "Stonks Trading API deployment update",
+            "color": color,
+            "fields": [
+                {
+                    "name": "Version",
+                    "value": version,
+                    "inline": True,
+                },
+                {
+                    "name": "Environment",
+                    "value": environment.upper(),
+                    "inline": True,
+                },
+                {
+                    "name": "Status",
+                    "value": status.upper(),
+                    "inline": True,
+                },
+            ],
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {"text": "Stonks Trading System"},
+        }
+
+        mention = "@here" if status.lower() == "failed" else ""
+        return await self.send_message(
+            f"{mention} Deployment {status.upper()}: v{version} to {environment}",
+            embeds=[embed],
+        )
+
+    async def send_alert_notification(
+        self,
+        alert_name: str,
+        severity: str,
+        description: str,
+        labels: dict[str, Any] | None = None,
+    ) -> bool:
+        """Send alert notification.
+
+        Args:
+            alert_name: Name of the alert
+            severity: Alert severity (critical, warning, info)
+            description: Alert description
+            labels: Additional alert labels
+
+        Returns:
+            True if message sent successfully
+        """
+        severity_colors = {
+            "critical": 0xFF0000,  # Red
+            "warning": 0xFFA500,  # Orange
+            "info": 0x3498DB,  # Blue
+        }
+        severity_emojis = {
+            "critical": "🚨",
+            "warning": "⚠️",
+            "info": "ℹ️",
+        }
+
+        color = severity_colors.get(severity.lower(), 0x808080)
+        emoji = severity_emojis.get(severity.lower(), "📢")
+
+        fields = [
+            {
+                "name": "Severity",
+                "value": severity.upper(),
+                "inline": True,
+            },
+            {
+                "name": "Alert",
+                "value": alert_name,
+                "inline": True,
+            },
+        ]
+
+        # Add bot context if available
+        if self.bot_context:
+            fields.insert(
+                0,
+                {
+                    "name": "Bot",
+                    "value": f"{self.bot_context['bot_type']}/{self.bot_context['instance_id']}",
+                    "inline": False,
+                },
+            )
+
+        # Add additional labels as fields
+        if labels:
+            for key, value in labels.items():
+                fields.append(
+                    {
+                        "name": key.replace("_", " ").title(),
+                        "value": str(value),
+                        "inline": True,
+                    }
+                )
+
+        embed = {
+            "title": f"{emoji} Alert: {alert_name}",
+            "description": description,
+            "color": color,
+            "fields": fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {"text": "Stonks Trading Alert"},
+        }
+
+        mention = "@here" if severity.lower() == "critical" else ""
+        return await self.send_message(
+            f"{mention} {severity.upper()}: {alert_name}",
+            embeds=[embed],
+        )
+
     async def close(self) -> None:
         await self.client.aclose()

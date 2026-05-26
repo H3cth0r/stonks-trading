@@ -25,6 +25,7 @@ from stonks_trading.domains.health.services import (
     SystemHealthCalculator,
 )
 from stonks_trading.domains.trading.value_objects import BotContext
+from stonks_trading.shared.metrics import MetricsExporter
 
 
 class RecordHeartbeatUseCase:
@@ -56,6 +57,13 @@ class RecordHeartbeatUseCase:
             state_hash=state_hash,
             candle_timestamp=candle_timestamp,
         )
+
+        # Increment heartbeat metric
+        MetricsExporter.increment_bot_heartbeat(
+            bot_type=context.bot_type,
+            bot_instance_id=context.instance_id,
+        )
+
         return await save_heartbeat(heartbeat)
 
 
@@ -97,6 +105,16 @@ class GetSystemHealthUseCase:
         """
         # Get system component health
         system_status = await get_system_health_status()
+
+        # Set DB health metrics
+        MetricsExporter.set_db_health(
+            db_type="postgres",
+            healthy=system_status.get("database_healthy", False),
+        )
+        MetricsExporter.set_db_health(
+            db_type="duckdb",
+            healthy=system_status.get("duckdb_healthy", False),
+        )
 
         # Get all bot health snapshots
         bot_healths = await list_all_bot_health_snapshots()

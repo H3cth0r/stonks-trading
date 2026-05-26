@@ -6,8 +6,14 @@ Log Types:
 - INFRA: Infrastructure events (DB connections, API calls)
 - TRADE: Trade execution events (fills, orders)
 - AUDIT: Compliance and tax audit trail
+
+Log Context:
+- bot_type: Bot type if available in context
+- bot_instance_id: Bot instance ID if available
+- log_type: Structured log level (ERROR, WARNING, INFRA, TRADE, AUDIT)
 """
 
+from contextvars import ContextVar
 from enum import Enum
 from typing import Any
 
@@ -15,6 +21,10 @@ import structlog
 from structlog.types import EventDict, WrappedLogger
 
 from stonks_trading.shared.config import settings
+
+# Context variables for log enrichment
+bot_type_var: ContextVar[str | None] = ContextVar("bot_type", default=None)
+bot_instance_id_var: ContextVar[str | None] = ContextVar("bot_instance_id", default=None)
 
 
 class LogLevel(Enum):
@@ -47,6 +57,23 @@ def add_log_type(
     return event_dict
 
 
+def add_bot_context(
+    logger: WrappedLogger,
+    method_name: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """Add bot context from ContextVars if available."""
+    bot_type = bot_type_var.get()
+    bot_instance_id = bot_instance_id_var.get()
+
+    if bot_type:
+        event_dict["bot_type"] = bot_type
+    if bot_instance_id:
+        event_dict["bot_instance_id"] = bot_instance_id
+
+    return event_dict
+
+
 def configure_logging() -> None:
     """Configure structlog for structured logging."""
     shared_processors: list[Any] = [
@@ -54,6 +81,7 @@ def configure_logging() -> None:
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         add_log_type,
+        add_bot_context,
         structlog.processors.dict_tracebacks,
     ]
 
@@ -116,3 +144,20 @@ def log_trade(event: str, **kwargs: Any) -> None:
 def log_audit(event: str, **kwargs: Any) -> None:
     """Log an audit event for compliance."""
     logger.info(event, log_type=LogLevel.AUDIT.value, **kwargs)
+
+
+def set_bot_context(bot_type: str, bot_instance_id: str) -> None:
+    """Set bot context for log enrichment.
+
+    Args:
+        bot_type: Type of bot (e.g., "neat_swing")
+        bot_instance_id: Bot instance ID
+    """
+    bot_type_var.set(bot_type)
+    bot_instance_id_var.set(bot_instance_id)
+
+
+def clear_bot_context() -> None:
+    """Clear bot context from logs."""
+    bot_type_var.set(None)
+    bot_instance_id_var.set(None)
