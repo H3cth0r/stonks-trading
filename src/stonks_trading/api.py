@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from tortoise.contrib.fastapi import register_tortoise
 
 from stonks_trading.domains.backtesting.routes import router as backtest_router
+from stonks_trading.domains.botcontrol.routes import get_botcontrol_router
 from stonks_trading.domains.health.routes import get_health_router
 from stonks_trading.domains.reconciliation.routes import get_reconciliation_router
 from stonks_trading.domains.trading.routes import get_trading_router
@@ -46,6 +47,12 @@ def create_app() -> FastAPI:
         get_reconciliation_router(),
         prefix="/api/v1",
         tags=["reconciliation"],
+    )
+    # Bot Control router (Phase 9F)
+    app.include_router(
+        get_botcontrol_router(),
+        prefix="/api/v1",
+        tags=["bot-control"],
     )
     # Future: app.include_router(get_portfolio_router(), prefix="/api/v1", tags=["portfolio"])
 

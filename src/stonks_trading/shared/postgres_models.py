@@ -454,3 +454,40 @@ class ReconciliationDiffModel(Model):
     class Meta:
         table = "reconciliation_diffs"
         indexes = (("report_id", "status"),)
+
+
+# =============================================================================
+# Bot Process Model (Phase 9F)
+# =============================================================================
+
+
+class BotProcessModel(Model):
+    """Bot process lifecycle for API-driven bot control.
+
+    Tracks the state of bot processes managed via the Bot Control domain.
+    Enables starting, stopping, and monitoring bot instances through the API.
+    """
+
+    id = fields.BigIntField(pk=True)
+    bot_type = fields.CharField(max_length=50, index=True)
+    bot_instance_id = fields.CharField(max_length=100, index=True)
+    mode = fields.CharField(max_length=20)
+    symbols = fields.JSONField(default=list)
+    pid = fields.IntField(null=True)
+    status = fields.CharField(
+        max_length=20, index=True
+    )  # registered, starting, running, stopping, stopped, error
+    started_at = fields.DatetimeField(null=True)
+    stopped_at = fields.DatetimeField(null=True)
+    exit_code = fields.IntField(null=True)
+    error_message = fields.TextField(null=True)
+    config_path = fields.CharField(max_length=255, default="config-neat.txt")
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "bot_processes"
+        indexes = (
+            ("bot_type", "bot_instance_id"),
+            ("status", "updated_at"),
+        )
