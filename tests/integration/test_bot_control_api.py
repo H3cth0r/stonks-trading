@@ -26,6 +26,11 @@ from stonks_trading.shared.postgres_models import BotInstanceModel, BotProcessMo
 class TestBotControlRepositories:
     """Test bot control repository functions."""
 
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_db(self, db_transaction):
+        """Automatically use database transaction for all tests."""
+        pass
+
     @pytest_asyncio.fixture
     async def test_bot_instance(self) -> BotInstanceModel:
         """Create a test bot instance."""
@@ -138,6 +143,11 @@ class TestBotControlRepositories:
 @pytest.mark.asyncio
 class TestBotControlUseCases:
     """Test bot control use cases."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_db(self, db_transaction):
+        """Automatically use database transaction for all tests."""
+        pass
 
     @pytest_asyncio.fixture
     async def registered_bot(self) -> BotInstanceModel:

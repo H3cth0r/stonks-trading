@@ -14,6 +14,7 @@ from stonks_trading.domains.botcontrol.repositories import (
     delete_bot_process,
     get_bot_process,
     list_running_bots,
+    list_stale_processes,
     update_bot_process_status,
 )
 from stonks_trading.domains.botcontrol.services import (
@@ -165,7 +166,7 @@ class StopBotUseCase:
         )
 
         # Update final status
-        bot_process = await update_bot_process_status(
+        updated_process = await update_bot_process_status(
             context=context,
             status=final_status,
             stopped_at=datetime.utcnow(),
@@ -173,11 +174,14 @@ class StopBotUseCase:
             error_message=error_message,
         )
 
+        if updated_process is None:
+            raise ValueError(f"Failed to update process status for {bot_type}/{instance_id}")
+
         logger.info(
             f"Stopped bot {bot_type}/{instance_id} "
             f"with exit_code={exit_code}, status={final_status.value}"
         )
-        return bot_process
+        return updated_process
 
 
 class GetBotStatusUseCase:
@@ -237,6 +241,9 @@ class GetBotStatusUseCase:
         last_trade_at = None  # Could be enhanced with actual trade lookup
 
         # Assemble complete status
+        if bot_process is None:
+            raise ValueError(f"Bot process {bot_type}/{instance_id} not found after status check")
+
         return BotStatusAssembler.assemble(
             process=bot_process,
             state=state_data,
@@ -349,10 +356,6 @@ class CleanupStaleBotsUseCase:
         Returns:
             List of processes marked as stale
         """
-        from stonks_trading.domains.botcontrol.repositories import (
-            list_stale_processes,
-        )
-
         # Get potentially stale processes
         stale_processes = await list_stale_processes(threshold_minutes)
 

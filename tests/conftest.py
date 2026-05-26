@@ -5,11 +5,16 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import pytest
+import pytest_asyncio
 from faker import Faker
 from hypothesis import settings
+from tortoise import Tortoise
+from tortoise.transactions import in_transaction
 
 from stonks_trading.domains.trading.entities import Position, Trade
+from stonks_trading.domains.trading.neat.config_builder import NeatConfig
 from stonks_trading.domains.trading.enums import Side
+from stonks_trading.shared.config import settings as app_settings
 from stonks_trading.domains.trading.services import (
     FeeCalculator,
     RiskChecker,
@@ -18,6 +23,31 @@ from stonks_trading.domains.trading.value_objects import InstrumentMapper, Money
 
 # Initialize Faker
 fake = Faker()
+
+
+# =============================================================================
+# Database Fixtures
+# =============================================================================
+
+
+@pytest_asyncio.fixture(scope="session")
+async def initialize_database():
+    """Initialize database connection and create tables once per test session."""
+    await Tortoise.init(
+        db_url=app_settings.database_url,
+        modules={"models": ["stonks_trading.shared.postgres_models"]}
+    )
+    await Tortoise.generate_schemas()
+    yield
+    await Tortoise.close_connections()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def db_transaction(initialize_database):
+    """Create a transaction that rolls back after each test function."""
+    async with in_transaction():
+        yield
+        # Transaction automatically rolls back
 
 # Hypothesis configuration
 settings.register_profile("ci", max_examples=100, deadline=None)
@@ -112,8 +142,6 @@ def sample_ohlcv_data() -> pd.DataFrame:
 @pytest.fixture
 def sample_neat_config():
     """Return sample NEAT configuration."""
-    from stonks_trading.domains.trading.neat.config_builder import NeatConfig
-
     return NeatConfig(
         pop_size=10,
         num_generations=5,

@@ -161,7 +161,7 @@ async def delete_bot_process(context: BotContext) -> bool:
         bot_instance_id=context.instance_id,
     ).delete()
 
-    return deleted > 0
+    return bool(deleted > 0)
 
 
 async def list_stale_processes(threshold_minutes: int = 5) -> list[BotProcess]:
@@ -203,7 +203,7 @@ async def check_bot_instance_exists(bot_type: str, instance_id: str) -> bool:
         instance_id=instance_id,
     ).count()
 
-    return count > 0
+    return bool(count > 0)
 
 
 # =============================================================================
