@@ -56,6 +56,7 @@ class TestSystemHealthEndpoint:
             bots=[],
             checked_at=datetime.utcnow(),
             message=None,
+            version="0.1.0",
         )
 
         response = client.get("/health")

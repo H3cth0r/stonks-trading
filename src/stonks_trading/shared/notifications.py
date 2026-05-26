@@ -9,9 +9,11 @@ from typing import Any
 
 import httpx
 
+from stonks_trading.domains.reconciliation.entities import ReconciliationReport
 from stonks_trading.domains.trading.entities import Trade
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.value_objects import Money
+from stonks_trading.shared.logger import logger
 
 
 class DiscordNotifier:
@@ -505,6 +507,109 @@ class DiscordNotifier:
         }
 
         return await self.send_message("Daily Trading Summary", embeds=[embed])
+
+    async def send_reconciliation_alert(
+        self,
+        report: Any,
+        threshold: int = 5,
+    ) -> bool:
+        """Send Discord alert for reconciliation issues.
+
+        Args:
+            report: ReconciliationReport entity with results
+            threshold: Number of issues that triggered the alert
+
+        Returns:
+            True if message sent successfully
+        """
+        if not isinstance(report, ReconciliationReport):
+            logger.warning("send_reconciliation_alert expects ReconciliationReport entity")
+            return False
+
+        # Determine severity and color
+        if report.mismatches > 0 or report.missing_internal > 0:
+            color = 0xFF0000  # Red for serious issues
+            severity = "CRITICAL"
+        else:
+            color = 0xFFA500  # Orange for warnings
+            severity = "WARNING"
+
+        fields = [
+            {
+                "name": "Venue",
+                "value": report.venue.upper(),
+                "inline": True,
+            },
+            {
+                "name": "Symbol",
+                "value": report.symbol,
+                "inline": True,
+            },
+            {
+                "name": "Match Rate",
+                "value": f"{report.match_rate:.1f}%",
+                "inline": True,
+            },
+            {
+                "name": "Total Internal",
+                "value": str(report.total_internal),
+                "inline": True,
+            },
+            {
+                "name": "Total Venue",
+                "value": str(report.total_venue),
+                "inline": True,
+            },
+            {
+                "name": "Issues Found",
+                "value": f"{report.total_issues} (threshold: {threshold})",
+                "inline": True,
+            },
+            {
+                "name": "Mismatches",
+                "value": str(report.mismatches),
+                "inline": True,
+            },
+            {
+                "name": "Missing Internal",
+                "value": str(report.missing_internal),
+                "inline": True,
+            },
+            {
+                "name": "Missing Venue",
+                "value": str(report.missing_venue),
+                "inline": True,
+            },
+        ]
+
+        # Add bot context field if available
+        if self.bot_context:
+            fields.insert(
+                0,
+                {
+                    "name": "Bot",
+                    "value": f"{self.bot_context['bot_type']}/{self.bot_context['instance_id']}",
+                    "inline": False,
+                },
+            )
+
+        # Format time range
+        time_range = f"{report.start_time.strftime('%Y-%m-%d %H:%M')} to {report.end_time.strftime('%Y-%m-%d %H:%M')}"
+
+        embed = {
+            "title": f"Trade Reconciliation Alert: {severity}",
+            "description": f"Reconciliation found {report.total_issues} issues\nTime range: {time_range}",
+            "color": color,
+            "fields": fields,
+            "timestamp": datetime.utcnow().isoformat(),
+            "footer": {"text": f"Run ID: {report.run_id}"},
+        }
+
+        mention = "@here" if report.mismatches > 0 else ""
+        return await self.send_message(
+            f"{mention} Reconciliation Alert ({severity})",
+            embeds=[embed],
+        )
 
     async def close(self) -> None:
         await self.client.aclose()

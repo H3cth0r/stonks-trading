@@ -3,11 +3,13 @@
 Future domains register their routers here (e.g. domains.portfolio.routes).
 """
 
+import uvicorn
 from fastapi import FastAPI
 from tortoise.contrib.fastapi import register_tortoise
 
 from stonks_trading.domains.backtesting.routes import router as backtest_router
 from stonks_trading.domains.health.routes import get_health_router
+from stonks_trading.domains.reconciliation.routes import get_reconciliation_router
 from stonks_trading.domains.trading.routes import get_trading_router
 from stonks_trading.domains.training.routes import router as training_router
 from stonks_trading.shared.config import settings
@@ -30,6 +32,12 @@ def create_app() -> FastAPI:
     app.include_router(get_trading_router(), prefix="/api/v1", tags=["trading"])
     app.include_router(training_router, prefix="/api/v1", tags=["training"])
     app.include_router(backtest_router, prefix="/api/v1", tags=["backtesting"])
+    # Reconciliation router (Phase 9C)
+    app.include_router(
+        get_reconciliation_router(),
+        prefix="/api/v1",
+        tags=["reconciliation"],
+    )
     # Future: app.include_router(get_portfolio_router(), prefix="/api/v1", tags=["portfolio"])
 
     # Register Tortoise ORM
@@ -48,8 +56,6 @@ app = create_app()
 
 def main() -> None:
     """CLI entry point."""
-    import uvicorn
-
     uvicorn.run(
         "stonks_trading.api:app",
         host=settings.api_host,

@@ -72,3 +72,4 @@ class SystemHealth:
     bots: list[BotHealth] = field(default_factory=list)
     checked_at: datetime = field(default_factory=datetime.utcnow)
     message: str | None = None
+    version: str = "0.1.0"

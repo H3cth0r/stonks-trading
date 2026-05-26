@@ -206,6 +206,10 @@ module = "stonks_trading.domains.health.routes"
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = "stonks_trading.domains.reconciliation.routes"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
 module = "stonks_trading.api"
 ignore_errors = true
 

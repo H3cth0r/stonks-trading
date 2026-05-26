@@ -73,6 +73,7 @@ class SystemHealthMapper:
             bots=[BotHealthMapper.to_response(b) for b in entity.bots],
             checked_at=entity.checked_at,
             message=entity.message,
+            version=entity.version,
         )
 
 

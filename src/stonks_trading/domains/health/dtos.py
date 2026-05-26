@@ -57,6 +57,7 @@ class SystemHealthResponse(BaseModel):
     bots: list[BotHealthResponse]
     checked_at: datetime
     message: str | None = None
+    version: str = "0.1.0"  # API version
 
 
 class HealthCheckResponse(BaseModel):

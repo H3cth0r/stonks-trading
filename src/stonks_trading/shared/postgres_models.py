@@ -395,3 +395,62 @@ class BotHeartbeatModel(Model):
     class Meta:
         table = "bot_heartbeats"
         indexes = (("bot_type", "bot_instance_id", "timestamp"),)
+
+
+# =============================================================================
+# Reconciliation Report Model (Phase 9C)
+# =============================================================================
+
+
+class ReconciliationReportModel(Model):
+    """Reconciliation report for venue trade matching."""
+
+    id = fields.BigIntField(pk=True)
+    run_id = fields.CharField(max_length=100, unique=True)
+    venue = fields.CharField(max_length=20)
+    symbol = fields.CharField(max_length=20, index=True)
+    start_time = fields.DatetimeField()
+    end_time = fields.DatetimeField()
+    total_internal = fields.IntField(default=0)
+    total_venue = fields.IntField(default=0)
+    matched = fields.IntField(default=0)
+    mismatches = fields.IntField(default=0)
+    missing_internal = fields.IntField(default=0)
+    missing_venue = fields.IntField(default=0)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = "reconciliation_reports"
+        indexes = (("venue", "created_at"), ("symbol", "created_at"))
+
+
+# =============================================================================
+# Reconciliation Diff Model (Phase 9C)
+# =============================================================================
+
+
+class ReconciliationDiffModel(Model):
+    """Individual differences found during reconciliation."""
+
+    id = fields.BigIntField(pk=True)
+    report = fields.ForeignKeyField(
+        "models.ReconciliationReportModel",
+        related_name="diffs",
+    )
+    status = fields.CharField(max_length=20)  # matched, mismatch, missing_internal, missing_venue
+    internal_trade_id = fields.BigIntField(null=True, index=True)
+    venue_trade_id = fields.CharField(max_length=100, null=True, index=True)
+    field_differences = fields.JSONField(null=True)
+    symbol = fields.CharField(max_length=20, null=True)
+    side = fields.CharField(max_length=10, null=True)
+    internal_price = fields.FloatField(null=True)
+    venue_price = fields.FloatField(null=True)
+    internal_quantity = fields.FloatField(null=True)
+    venue_quantity = fields.FloatField(null=True)
+    internal_timestamp = fields.DatetimeField(null=True)
+    venue_timestamp = fields.DatetimeField(null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = "reconciliation_diffs"
+        indexes = (("report_id", "status"),)
