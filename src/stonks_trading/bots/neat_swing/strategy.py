@@ -9,6 +9,7 @@ This strategy implements the exact trading logic from NEAT/main.py:
 - All-in / all-out trading logic
 """
 
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -51,6 +52,7 @@ class NeatSwingStrategy(BaseStrategy):
         self.neat_config: Config | None = None
         self.genomes: dict[Symbol, DefaultGenome] = {}
         self.networks: dict[Symbol, RecurrentNetwork] = {}
+        self._last_candle_timestamps: dict[Symbol, datetime] = {}
 
     @property
     def name(self) -> str:
@@ -291,3 +293,23 @@ class NeatSwingStrategy(BaseStrategy):
             return Side.SELL
 
         return None
+
+    def update_last_candle_timestamp(self, symbol: Symbol, timestamp: datetime) -> None:
+        """Update the last processed candle timestamp for a symbol.
+
+        Args:
+            symbol: Trading symbol.
+            timestamp: Candle timestamp.
+        """
+        self._last_candle_timestamps[symbol] = timestamp
+
+    def get_last_candle_timestamp(self, symbol: Symbol) -> datetime | None:
+        """Get the last processed candle timestamp for a symbol.
+
+        Args:
+            symbol: Trading symbol.
+
+        Returns:
+            Last candle timestamp or None if not set.
+        """
+        return self._last_candle_timestamps.get(symbol)

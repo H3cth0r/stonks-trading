@@ -7,6 +7,9 @@ primary_region = "dfw"
 [build]
   dockerfile = "infra/Dockerfile.dashboard"
 
+[deploy]
+  strategy = "bluegreen"
+
 [env]
   API_BASE_URL = "https://stonks-trading-api.fly.dev"
 

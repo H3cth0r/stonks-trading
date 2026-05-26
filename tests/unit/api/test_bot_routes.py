@@ -30,7 +30,7 @@ class TestBotContextDependency:
     async def test_bot_not_found_returns_404(self, client) -> None:
         """Test that non-existent bot returns 404."""
         with patch(
-            "stonks_trading.domains.trading.repositories.BotInstanceRepository.get"
+            "stonks_trading.domains.trading.repositories.get_bot_instance"
         ) as mock_get:
             mock_get.return_value = None
             response = await client.get("/api/v1/bots/neat_swing/non-existent-instance/state")
@@ -43,10 +43,10 @@ class TestBotContextDependency:
         mock_instance.status = "running"
         with (
             patch(
-                "stonks_trading.domains.trading.repositories.BotInstanceRepository.get"
+                "stonks_trading.domains.trading.repositories.get_bot_instance"
             ) as mock_get,
             patch(
-                "stonks_trading.domains.trading.repositories.BotStateRepository.load"
+                "stonks_trading.domains.trading.repositories.load_bot_state"
             ) as mock_load,
         ):
             mock_get.return_value = mock_instance
@@ -68,7 +68,7 @@ class TestBotScopedRoutes:
         mock_instance.status = "running"
         with (
             patch(
-                "stonks_trading.domains.trading.repositories.BotInstanceRepository.get"
+                "stonks_trading.domains.trading.repositories.get_bot_instance"
             ) as mock_get,
             patch("stonks_trading.domains.trading.repositories.list_trades_by_bot") as mock_list,
         ):
@@ -87,7 +87,7 @@ class TestBotScopedRoutes:
         mock_instance.status = "running"
         with (
             patch(
-                "stonks_trading.domains.trading.repositories.BotInstanceRepository.get"
+                "stonks_trading.domains.trading.repositories.get_bot_instance"
             ) as mock_get,
             patch("stonks_trading.domains.trading.repositories.list_trades_by_bot") as mock_list,
         ):
@@ -104,7 +104,7 @@ class TestBotScopedRoutes:
         mock_instance.status = "running"
         with (
             patch(
-                "stonks_trading.domains.trading.repositories.BotInstanceRepository.get"
+                "stonks_trading.domains.trading.repositories.get_bot_instance"
             ) as mock_get,
             patch("stonks_trading.domains.trading.repositories.list_positions_by_bot") as mock_list,
         ):
@@ -126,10 +126,10 @@ class TestBotStateEndpoint:
         mock_state = {"positions": {"BTC_USD": {"qty": 0.5}}, "trades_today": 3}
         with (
             patch(
-                "stonks_trading.domains.trading.repositories.BotInstanceRepository.get"
+                "stonks_trading.domains.trading.repositories.get_bot_instance"
             ) as mock_get,
             patch(
-                "stonks_trading.domains.trading.repositories.BotStateRepository.load"
+                "stonks_trading.domains.trading.repositories.load_bot_state"
             ) as mock_load,
         ):
             mock_get.return_value = mock_instance
@@ -147,10 +147,10 @@ class TestBotStateEndpoint:
         mock_instance.status = "stopped"
         with (
             patch(
-                "stonks_trading.domains.trading.repositories.BotInstanceRepository.get"
+                "stonks_trading.domains.trading.repositories.get_bot_instance"
             ) as mock_get,
             patch(
-                "stonks_trading.domains.trading.repositories.BotStateRepository.load"
+                "stonks_trading.domains.trading.repositories.load_bot_state"
             ) as mock_load,
         ):
             mock_get.return_value = mock_instance

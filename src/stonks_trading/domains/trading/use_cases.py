@@ -41,6 +41,7 @@ from stonks_trading.domains.trading.services import (
     RiskChecker,
 )
 from stonks_trading.domains.trading.value_objects import BotContext, InstrumentMapper, Money, Symbol
+from stonks_trading.shared.metrics import MetricsExporter
 
 
 class ExecuteTradeUseCase:
@@ -666,12 +667,22 @@ class ExecuteBotTradeUseCase:
                 error=f"Risk check failed: {risk_result.reason}",
             )
 
-        # Execute via adapter
+        # Execute via adapter with latency tracking
+        trade_start_time = datetime.utcnow()
         order_result = await self.adapter.place_order(
             symbol=symbol,
             side=side,
             quantity=quantity,
             order_type="market",
+        )
+
+        # Record trade latency
+        trade_latency_ms = (datetime.utcnow() - trade_start_time).total_seconds() * 1000
+        MetricsExporter.observe_trade_latency(
+            bot_type=context.bot_type,
+            bot_instance_id=context.instance_id,
+            venue=order_result.venue if hasattr(order_result, "venue") else "unknown",
+            latency_ms=trade_latency_ms,
         )
 
         if not order_result.success:

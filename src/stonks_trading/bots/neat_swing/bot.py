@@ -8,7 +8,9 @@ Implements the live trading bot for NEAT swing strategy with:
 """
 
 import asyncio
+import hashlib
 import logging
+from datetime import datetime
 from typing import Any
 
 from stonks_trading.bots import BotRegistry
@@ -19,16 +21,21 @@ from stonks_trading.bots.neat_swing.strategy import (
     MIN_TRADE_INTERVAL,
     NeatSwingStrategy,
 )
+from stonks_trading.domains.health.use_cases import RecordHeartbeatUseCase
 from stonks_trading.domains.trading.entities import Position
 from stonks_trading.domains.trading.enums import Side, TradingMode
 from stonks_trading.domains.trading.repositories import (
-    BotInstanceRepository,
-    BotStateRepository,
     get_active_genome,
+    load_bot_state,
+    register_bot_instance,
+    save_bot_state,
+    update_bot_instance_status,
 )
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import ExecuteBotTradeUseCase
 from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.logger import clear_bot_context, set_bot_context
+from stonks_trading.shared.metrics import MetricsExporter
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +92,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
 
     async def register(self) -> None:
         """Register bot instance with database."""
-        await BotInstanceRepository.register(
+        await register_bot_instance(
             bot_type=self.bot_type,
             instance_id=self.context.instance_id,
             symbols=[s.value for s in self.symbols],
@@ -97,6 +104,9 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
     async def start(self) -> None:
         """Start the bot main loop."""
         self._running = True
+
+        # Set bot context for logging
+        set_bot_context(self.bot_type, self.context.instance_id)
 
         # Register with database
         await self.register()
@@ -122,9 +132,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         )
 
         # Update status
-        await BotInstanceRepository.update_status(
-            self.bot_type, self.context.instance_id, "running"
-        )
+        await update_bot_instance_status(self.bot_type, self.context.instance_id, "running")
 
         # Run main loop
         await self._main_loop()
@@ -146,9 +154,10 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         await self.persist_state()
 
         # Update status
-        await BotInstanceRepository.update_status(
-            self.bot_type, self.context.instance_id, "stopped"
-        )
+        await update_bot_instance_status(self.bot_type, self.context.instance_id, "stopped")
+
+        # Clear bot context from logs
+        clear_bot_context()
 
     async def handle_candle(self, candle: dict[str, Any]) -> None:
         """Queue candle for processing by main loop.
@@ -161,7 +170,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
     async def persist_state(self) -> None:
         """Save current state to database."""
         state_dict = self.state.to_dict()
-        await BotStateRepository.save(self.context, state_dict)
+        await save_bot_state(self.context, state_dict)
         logger.debug(f"Persisted state for {self.context}")
 
     async def load_state(self) -> NeatSwingState | None:
@@ -170,7 +179,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         Returns:
             NeatSwingState or None if no previous state
         """
-        data = await BotStateRepository.load(self.context)
+        data = await load_bot_state(self.context)
         if data:
             return NeatSwingState.from_dict(data)
         return None
@@ -198,6 +207,13 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                     logger.debug(f"No network for {symbol}, skipping")
                     continue
 
+                # Update last candle timestamp for heartbeat
+                if "timestamp" in candle:
+                    candle_ts = candle["timestamp"]
+                    if isinstance(candle_ts, str):
+                        candle_ts = datetime.fromisoformat(candle_ts.replace("Z", "+00:00"))
+                    self.strategy.update_last_candle_timestamp(symbol, candle_ts)
+
                 # Build state vector and get decision
                 state_vector = self._build_state_vector(symbol, candle)
                 buy_prob, sell_prob = self.strategy.activate_network(symbol, state_vector)
@@ -215,6 +231,41 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                             + (trade.realized_pnl.amount if trade.realized_pnl else 0)
                         )
                         await self.persist_state()
+
+                        # Instrument metrics
+                        MetricsExporter.increment_bot_trades(
+                            bot_type=self.bot_type,
+                            bot_instance_id=self.context.instance_id,
+                            symbol=symbol.value,
+                            side=action.value,
+                        )
+                        MetricsExporter.set_bot_equity(
+                            bot_type=self.bot_type,
+                            bot_instance_id=self.context.instance_id,
+                            equity_usd=self.state.current_equity,
+                        )
+                        # Calculate drawdown from peak and current equity
+                        drawdown_pct = 0.0
+                        if self.state.peak_equity > 0:
+                            drawdown_pct = (
+                                (self.state.peak_equity - self.state.current_equity)
+                                / self.state.peak_equity
+                                * 100
+                            )
+                        MetricsExporter.set_bot_drawdown(
+                            bot_type=self.bot_type,
+                            bot_instance_id=self.context.instance_id,
+                            drawdown_pct=drawdown_pct,
+                        )
+                        position = self.state.positions.get(symbol)
+                        if position:
+                            MetricsExporter.set_bot_position(
+                                bot_type=self.bot_type,
+                                bot_instance_id=self.context.instance_id,
+                                symbol=symbol.value,
+                                quantity=position.quantity,
+                            )
+
                         logger.info(f"Executed {action.value} for {symbol} at {candle['close']}")
 
             except TimeoutError:
@@ -385,3 +436,46 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             websocket: WebSocket client instance
         """
         self._websocket = websocket
+
+    async def heartbeat(self) -> None:
+        """Send periodic heartbeat for health monitoring.
+
+        Called by runner every 60 seconds to indicate the bot
+        is alive and processing data.
+        """
+        try:
+            # Compute state hash from current state
+            state_hash = self._compute_state_hash()
+
+            # Get last candle timestamp from strategy if available
+            last_candle_ts = None
+            if self.symbols:
+                # Try to get the most recent candle timestamp from strategy
+                symbol = self.symbols[0]
+                last_candle_ts = self.strategy.get_last_candle_timestamp(symbol)
+
+            use_case = RecordHeartbeatUseCase()
+            await use_case.execute(
+                context=self.context,
+                state_hash=state_hash,
+                candle_timestamp=last_candle_ts,
+            )
+            logger.debug(f"Heartbeat sent for {self.context}")
+        except Exception as e:
+            logger.warning(f"Failed to send heartbeat: {e}")
+
+    def _compute_state_hash(self) -> str:
+        """Compute hash of current bot state for integrity.
+
+        Returns:
+            Hex string hash of key state values
+        """
+        state_parts = [
+            self.context.bot_type,
+            self.context.instance_id,
+            str(self.state.current_equity),
+            str(len(self.state.positions)),
+            str(self.state.trades_today),
+        ]
+        state_str = "|".join(state_parts)
+        return hashlib.sha256(state_str.encode()).hexdigest()[:16]

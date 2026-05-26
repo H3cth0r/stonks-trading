@@ -98,6 +98,9 @@ class ConcreteBot(BaseBot[TestState, TestStrategy]):
     async def load_state(self) -> TestState | None:
         return None
 
+    async def heartbeat(self) -> None:
+        pass
+
 
 class TestBaseBot:
     """Test suite for BaseBot abstract class."""

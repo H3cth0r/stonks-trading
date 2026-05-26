@@ -108,6 +108,9 @@ class MockBot(BaseBot[MockState, MockStrategy]):
     async def load_state(self) -> MockState | None:
         return None
 
+    async def heartbeat(self) -> None:
+        pass
+
 
 class TestBotRegistry:
     """Test suite for BotRegistry."""

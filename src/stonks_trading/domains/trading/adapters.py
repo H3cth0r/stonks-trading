@@ -24,6 +24,7 @@ from stonks_trading.domains.trading.entities import Balance, OrderResult
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.value_objects import InstrumentMapper, Money, Symbol
 from stonks_trading.shared.config import settings
+from stonks_trading.shared.logger import logger
 
 
 class IExchangeAdapter(ABC):
@@ -154,6 +155,30 @@ class IExchangeAdapter(ABC):
     @abstractmethod
     async def close(self) -> None:
         """Close HTTP client and cleanup."""
+        pass
+
+    @abstractmethod
+    async def get_my_trades(
+        self,
+        symbol: Symbol,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[dict[str, Any]]:
+        """Get account trade history from exchange.
+
+        Fetches executed trades for the account from the exchange API.
+        Used for reconciliation against internal trade records.
+
+        Args:
+            symbol: Trading symbol
+            start_time: Start of time range
+            end_time: End of time range
+
+        Returns:
+            List of trade records in exchange-specific format.
+            Each trade should include: id, price, qty, commission,
+            commissionAsset, time, isBuyer, isMaker
+        """
         pass
 
 
@@ -408,6 +433,49 @@ class BinanceAdapter(IExchangeAdapter):
     async def close(self) -> None:
         await self.client.aclose()
 
+    async def get_my_trades(
+        self,
+        symbol: Symbol,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[dict[str, Any]]:
+        """Get account trade history from Binance.
+
+        Calls GET /api/v3/myTrades with HMAC-SHA256 signing.
+        Handles pagination (max 1000 trades per request).
+
+        Args:
+            symbol: Trading symbol
+            start_time: Start of time range
+            end_time: End of time range
+
+        Returns:
+            List of trade records from Binance
+        """
+        venue_symbol = self.instrument_mapper.to_venue_symbol(symbol, "binance")
+
+        # Convert datetime to milliseconds timestamp
+        start_ms = int(start_time.timestamp() * 1000)
+        end_ms = int(end_time.timestamp() * 1000)
+
+        params: dict[str, Any] = {
+            "symbol": venue_symbol.value.upper(),
+            "startTime": start_ms,
+            "endTime": end_ms,
+            "limit": 1000,
+        }
+
+        data = await self._signed_request("GET", "/api/v3/myTrades", params)
+
+        # Ensure we return a list
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict) and "msg" in data:
+            # Error response
+            logger.warning(f"Binance myTrades error: {data.get('msg')}")
+            return []
+        return []
+
 
 class DryRunAdapter(IExchangeAdapter):
     """Dry-run (paper trading) adapter.
@@ -589,6 +657,22 @@ class DryRunAdapter(IExchangeAdapter):
     async def close(self) -> None:
         pass
 
+    async def get_my_trades(
+        self,
+        symbol: Symbol,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[dict[str, Any]]:
+        """Dry-run returns empty list to prevent false mismatches.
+
+        In dry-run mode, trades are simulated and not recorded on
+        the exchange, so there are no venue statements to reconcile.
+        """
+        logger.warning(
+            "DryRunAdapter: get_my_trades returns empty list (no venue trades in dry-run)"
+        )
+        return []
+
 
 class BitsoAdapter(IExchangeAdapter):
     """Bitso adapter skeleton for future MXN integration.
@@ -653,6 +737,15 @@ class BitsoAdapter(IExchangeAdapter):
 
     async def close(self) -> None:
         await self.client.aclose()
+
+    async def get_my_trades(
+        self,
+        symbol: Symbol,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[dict[str, Any]]:
+        """Bitso trade history not implemented - Phase 5+."""
+        raise NotImplementedError("Bitso get_my_trades: Phase 5+")
 
 
 class ExchangeAdapterFactory:

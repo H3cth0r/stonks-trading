@@ -7,7 +7,7 @@ from time import sleep
 
 import streamlit as st
 
-from stonks_trading.presentation.dashboard.utils import fetch_sync
+from stonks_trading.presentation.dashboard.utils import fetch_sync, post_sync
 
 st.set_page_config(page_title="Live Trading", page_icon="📊")
 
@@ -26,8 +26,53 @@ refresh_interval = st.sidebar.slider("Refresh interval (seconds)", 10, 300, 30)
 if selected_bot and selected_bot != "No bots available":
     bot_type, instance_id = selected_bot.split("/", 1)
 
+    # Bot Control Section
+    st.subheader("Bot Control")
+    col1, col2, col3 = st.columns(3)
+
+    # Get current status for button states
+    status_data = fetch_sync(f"/api/v1/bots/{bot_type}/{instance_id}/status")
+    current_status = status_data.get("status", "unknown") if status_data else "unknown"
+    is_running = current_status == "running"
+
+    with col1:
+        if st.button("▶️ Start Bot", disabled=is_running, use_container_width=True):
+            result = post_sync(
+                f"/api/v1/bots/{bot_type}/{instance_id}/start",
+                {"symbols": ["BTC_USD"], "mode": "dry_run"},
+            )
+            if result:
+                st.success(f"Bot started! PID: {result.get('pid')}")
+                sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to start bot")
+
+    with col2:
+        if st.button("⏹️ Stop Bot", disabled=not is_running, use_container_width=True):
+            result = post_sync(f"/api/v1/bots/{bot_type}/{instance_id}/stop")
+            if result:
+                st.success("Bot stopped")
+                sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to stop bot")
+
+    with col3:
+        if st.button("🔄 Restart Bot", use_container_width=True):
+            result = post_sync(f"/api/v1/bots/{bot_type}/{instance_id}/restart")
+            if result:
+                st.success(f"Bot restarted! PID: {result.get('pid')}")
+                sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to restart bot")
+
+    st.divider()
+
     # Bot Status Row
     col1, col2, col3, col4 = st.columns(4)
+    # Refresh status data after potential actions
     status_data = fetch_sync(f"/api/v1/bots/{bot_type}/{instance_id}/status")
 
     with col1:

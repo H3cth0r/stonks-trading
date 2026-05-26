@@ -1,0 +1,40 @@
+# Fly.io configuration for Stonks Trading API
+# Deploy with: fly deploy -c infra/fly.api.toml
+
+app = "stonks-trading-api"
+primary_region = "dfw"
+
+[build]
+  dockerfile = "infra/Dockerfile.api"
+
+[deploy]
+  strategy = "bluegreen"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 250
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+# Health check for bluegreen deploy validation
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "15s"
+  method = "GET"
+  path = "/health/ready"
+  protocol = "http"
+  restart_limit = 3
+  timeout = "5s"
+  tls_skip_verify = false

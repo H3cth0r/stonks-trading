@@ -1,0 +1,27 @@
+# Fly.io configuration for Stonks Trading Bot
+# Deploy with: fly deploy -c infra/fly.bot.toml
+
+app = "stonks-trading-bot"
+primary_region = "dfw"
+
+[build]
+  dockerfile = "infra/Dockerfile.bot"
+
+[deploy]
+  strategy = "bluegreen"
+
+# Bot process configuration
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+# Bot processes don't expose HTTP, so no health checks defined here
+# Health is monitored via the API /health/bots/{type}/{id} endpoint

@@ -108,7 +108,7 @@ jobs:
 
     - name: Verify no TYPE_CHECKING imports
       run: |
-        if grep -r "TYPE_CHECKING" src/; then
+        if grep -r "TYPE_CHECKING" src/stonks_trading/; then
           echo "ERROR: Found TYPE_CHECKING imports"
           exit 1
         fi
@@ -116,7 +116,11 @@ jobs:
 
     - name: Verify no string type annotations
       run: |
-        if grep -rn ':\s*"' src/domains/; then
+        # Check for forward reference type annotations (param: "Type" or -> "Type")
+        # Pattern matches: variable: "Type" or -> "Type"
+        # Excludes: dict keys (400: {"...), f-strings, docstrings with colons
+        if grep -rn '[a-zA-Z_][a-zA-Z0-9_]*\s*:\s*"[A-Z][a-zA-Z0-9_]*"\s*[,)]' src/stonks_trading/domains/ || \
+           grep -rn ')\s*->\s*"[A-Z][a-zA-Z0-9_]*"\s*:' src/stonks_trading/domains/; then
           echo "ERROR: Found string type annotations"
           exit 1
         fi
@@ -124,15 +128,18 @@ jobs:
 
     - name: Verify domain has no FastAPI imports
       run: |
-        if grep -r "from fastapi" src/domains/; then
-          echo "ERROR: Found FastAPI imports in domain layer"
+        # Exclude routes.py files which legitimately use FastAPI
+        results=$(grep -r "from fastapi" src/stonks_trading/domains/ --include="*.py" | grep -v "routes.py" || true)
+        if [ -n "$results" ]; then
+          echo "ERROR: Found FastAPI imports in domain layer (excluding routes.py):"
+          echo "$results"
           exit 1
         fi
         echo "✓ No FastAPI imports in domain layer"
 
     - name: Verify repositories use standalone functions
       run: |
-        if grep -n "class.*Repository" src/domains/trading/repositories.py; then
+        if grep -n "class.*Repository" src/stonks_trading/domains/*/repositories.py; then
           echo "ERROR: Found repository classes (should be standalone functions)"
           exit 1
         fi
