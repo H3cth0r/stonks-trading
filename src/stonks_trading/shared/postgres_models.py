@@ -221,7 +221,7 @@ class TrainingRunModel(Model):
     artifact_prefix_uri = fields.CharField(max_length=500, null=True)
     trainer_git_sha = fields.CharField(max_length=40, null=True)
     generations = fields.IntField()
-    best_fitness = fields.FloatField()
+    best_fitness = fields.FloatField(null=True)
     best_roi_validation = fields.FloatField(null=True)
     best_roi_test = fields.FloatField(null=True)
     episode_steps = fields.IntField(default=20160)
@@ -230,6 +230,7 @@ class TrainingRunModel(Model):
     started_at = fields.DatetimeField(auto_now_add=True)
     finished_at = fields.DatetimeField(null=True)
     status = fields.CharField(max_length=20, default="running", index=True)
+    config_snapshot = fields.JSONField(null=True)  # NEAT config for reproducibility
 
     class Meta:
         table = "training_runs"

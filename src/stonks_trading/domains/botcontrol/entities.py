@@ -7,7 +7,7 @@ They represent bot process lifecycle and status information.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 
 
@@ -59,9 +59,20 @@ class BotProcess:
         """Calculate uptime in seconds if bot is running."""
         if self.started_at is None:
             return None
+
+        # Handle timezone-aware vs naive datetime comparison
+
+        now = datetime.now(UTC)
+        started = self.started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
+
         if self.stopped_at is not None:
-            return int((self.stopped_at - self.started_at).total_seconds())
-        return int((datetime.utcnow() - self.started_at).total_seconds())
+            stopped = self.stopped_at
+            if stopped.tzinfo is None:
+                stopped = stopped.replace(tzinfo=UTC)
+            return int((stopped - started).total_seconds())
+        return int((now - started).total_seconds())
 
     @property
     def is_running(self) -> bool:

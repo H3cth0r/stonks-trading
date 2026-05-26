@@ -2,6 +2,7 @@
 """Seed test data for development and testing."""
 
 import asyncio
+import pickle
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,31 @@ from stonks_trading.shared.postgres_models import (
     TradeSide,
     TradingMode,
 )
+
+
+def create_minimal_genome_bytes() -> bytes:
+    """Create minimal pickled genome data for seeding.
+
+    Returns a pickled tuple of (genome, config)
+    that can be deserialized by the backtest use case.
+    """
+    try:
+        import neat
+        from stonks_trading.domains.trading.neat.config_builder import create_default_config
+
+        # Create default NEAT config
+        config = create_default_config()
+
+        # Create a minimal genome with the default genome type from config
+        genome = config.genome_type(1)
+        genome.configure_new(config.genome_config)
+        genome.fitness = 1.0
+
+        return pickle.dumps((genome, config))
+    except Exception as e:
+        print(f"Warning: Could not create NEAT genome: {e}")
+        # Fallback: return empty bytes - backtest will fail gracefully
+        return b""
 
 
 async def seed() -> int:
@@ -101,11 +127,14 @@ async def seed() -> int:
         await position.save()
     print(f"  Created {len(positions)} positions")
 
-    # Create test genomes
+    # Create test genomes with valid pickled data
+    genome_btc = create_minimal_genome_bytes()
+    genome_eth = create_minimal_genome_bytes()
+
     genomes = [
         GenomeModel(
             symbol="BTC_USD",
-            genome_data=b"fake_genome_data_btc",
+            genome_data=genome_btc,
             fitness=1.25,
             generation=30,
             model_family="NEAT_RNN_V1",
@@ -121,7 +150,7 @@ async def seed() -> int:
         ),
         GenomeModel(
             symbol="ETH_USD",
-            genome_data=b"fake_genome_data_eth",
+            genome_data=genome_eth,
             fitness=0.95,
             generation=20,
             model_family="NEAT_RNN_V1",
