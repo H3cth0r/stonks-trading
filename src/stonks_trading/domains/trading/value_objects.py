@@ -4,6 +4,8 @@ Value objects are immutable, frozen Pydantic models that represent
 domain concepts with validation and equality based on their values.
 """
 
+from __future__ import annotations
+
 from pydantic import BaseModel, Field, field_validator
 
 from stonks_trading.domains.trading.enums import Side
@@ -44,7 +46,7 @@ class InstrumentMapper:
         """
         self.mappings = mappings or self.DEFAULT_MAPPINGS
 
-    def to_venue_symbol(self, canonical: "Symbol", venue: str) -> "Symbol":
+    def to_venue_symbol(self, canonical: Symbol, venue: str) -> Symbol:
         """Convert canonical symbol to venue-specific symbol."""
         venue = venue.lower()
         canonical_str = canonical.value.upper()
@@ -59,7 +61,7 @@ class InstrumentMapper:
 
         return canonical
 
-    def to_canonical(self, venue_symbol: "Symbol", venue: str) -> "Symbol":
+    def to_canonical(self, venue_symbol: Symbol, venue: str) -> Symbol:
         """Convert venue symbol to canonical symbol."""
         venue = venue.lower()
         venue_str = venue_symbol.value.upper()
@@ -77,7 +79,7 @@ class InstrumentMapper:
 
         return venue_symbol
 
-    def get_supported_symbols(self, venue: str) -> list["Symbol"]:
+    def get_supported_symbols(self, venue: str) -> list[Symbol]:
         """Get list of supported symbols for venue."""
         venue = venue.lower()
         if venue not in self.mappings:
@@ -139,27 +141,27 @@ class Money(BaseModel):
         """Return raw float amount (for serialization)."""
         return self.amount
 
-    def __add__(self, other: "Money") -> "Money":
+    def __add__(self, other: Money) -> Money:
         """Add two Money objects of same currency."""
         if self.currency != other.currency:
             raise ValueError(f"Cannot add {self.currency} and {other.currency}")
         return Money(amount=self.amount + other.amount, currency=self.currency)
 
-    def __sub__(self, other: "Money") -> "Money":
+    def __sub__(self, other: Money) -> Money:
         """Subtract two Money objects of same currency."""
         if self.currency != other.currency:
             raise ValueError(f"Cannot subtract {other.currency} from {self.currency}")
         return Money(amount=self.amount - other.amount, currency=self.currency)
 
-    def __mul__(self, scalar: float) -> "Money":
+    def __mul__(self, scalar: float) -> Money:
         """Multiply Money by scalar."""
         return Money(amount=self.amount * scalar, currency=self.currency)
 
-    def __rmul__(self, scalar: float) -> "Money":
+    def __rmul__(self, scalar: float) -> Money:
         """Scalar multiplication (reverse)."""
         return self.__mul__(scalar)
 
-    def __truediv__(self, scalar: float) -> "Money":
+    def __truediv__(self, scalar: float) -> Money:
         """Divide Money by scalar."""
         if scalar == 0:
             raise ValueError("Cannot divide by zero")

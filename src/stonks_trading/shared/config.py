@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str = "postgresql://user:pass@localhost/stonks_trading"
+    database_url: str = "postgres://user:pass@localhost/stonks_trading"
 
     # Trading
     mode: str = "dry_run"  # "backtest", "dry_run", "live"
