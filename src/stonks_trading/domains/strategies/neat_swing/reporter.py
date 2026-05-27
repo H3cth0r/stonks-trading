@@ -15,7 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from stonks_trading.domains.trading.neat.trading_env import TradingEnv
+from stonks_trading.domains.strategies.neat_swing.trading_env import TradingEnv
 
 
 class PeriodicReporter(neat.reporting.BaseReporter):

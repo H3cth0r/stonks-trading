@@ -59,6 +59,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         strategy: NeatSwingStrategy,
         initial_state: NeatSwingState,
         config_path: str = "config-neat.txt",
+        capital_allocation: float | None = None,
     ):
         """Initialize NEAT swing bot.
 
@@ -69,6 +70,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             strategy: NeatSwingStrategy instance
             initial_state: Initial NeatSwingState
             config_path: Path to NEAT config file
+            capital_allocation: Capital allocation for this bot
         """
         super().__init__(
             context=context,
@@ -76,6 +78,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             mode=mode,
             strategy=strategy,
             initial_state=initial_state,
+            capital_allocation=capital_allocation,
         )
         self.config_path = config_path
         self.candle_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -396,6 +399,9 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
     ) -> float:
         """Calculate trade quantity (all-in / all-out logic).
 
+        Uses capital_allocation if set, otherwise falls back to available balance
+        or current equity.
+
         Args:
             symbol: Trading symbol
             candle: Current candle
@@ -408,8 +414,10 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         price = candle["close"]
 
         if side == Side.BUY:
-            # All-in: use available quote currency
-            if self.adapter:
+            # All-in: use capital_allocation if set, otherwise available balance
+            if self.capital_allocation is not None:
+                usdt_balance = self.capital_allocation
+            elif self.adapter:
                 balances = self.adapter.get_balance()
                 if isinstance(balances, list):
                     usdt_balance = next((b.total for b in balances if b.asset == "USDT"), 0.0)

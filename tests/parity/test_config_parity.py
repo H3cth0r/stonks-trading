@@ -2,7 +2,7 @@
 
 import pytest
 
-from stonks_trading.domains.trading.neat.config_builder import (
+from stonks_trading.domains.strategies.neat_swing.config_builder import (
     DEFAULT_CONFIG,
     create_default_config,
 )

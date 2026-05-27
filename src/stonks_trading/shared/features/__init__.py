@@ -2,7 +2,7 @@
 
 Provides real-time feature computation from streaming candles.
 Must produce identical results to the training features module
-(domains/trading/neat/features.py).
+(domains/strategies/neat_swing/features.py).
 """
 
 from stonks_trading.shared.features.live_features import LiveFeatureComputer

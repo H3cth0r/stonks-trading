@@ -134,7 +134,7 @@ def load_and_engineer(
     df = pd.read_csv(
         data_path,
         skiprows=[1, 2],  # MultiIndex CSV format
-        header=0,
+        header=1,
         names=cols,
         parse_dates=["Datetime"],
         index_col="Datetime",

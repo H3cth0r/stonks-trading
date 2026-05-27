@@ -14,14 +14,18 @@ from tortoise.contrib.fastapi import register_tortoise
 
 from stonks_trading.domains.backtesting.routes import router as backtest_router
 from stonks_trading.domains.botcontrol.routes import get_botcontrol_router
+from stonks_trading.domains.capital.routes import get_capital_router
 from stonks_trading.domains.health.routes import get_health_router
 from stonks_trading.domains.reconciliation.routes import get_reconciliation_router
+from stonks_trading.domains.strategies.routes import get_strategies_router
 from stonks_trading.domains.trading.routes import get_trading_router
+from stonks_trading.domains.training.models_routes import get_models_router
 from stonks_trading.domains.training.routes import router as training_router
 from stonks_trading.shared.config import settings
 from stonks_trading.shared.database import TORTOISE_ORM
 from stonks_trading.shared.logger import logger
 from stonks_trading.shared.metrics import MetricsExporter
+from stonks_trading.shared.websocket_api import get_websocket_router
 
 
 async def init_database() -> None:
@@ -129,7 +133,26 @@ def create_app() -> FastAPI:
         prefix="/api/v1",
         tags=["bot-control"],
     )
-    # Future: app.include_router(get_portfolio_router(), prefix="/api/v1", tags=["portfolio"])
+    # Capital Management router (Phase 10F)
+    app.include_router(
+        get_capital_router(),
+        prefix="/api/v1",
+        tags=["capital"],
+    )
+    # Strategy Management router (Phase 10G)
+    app.include_router(
+        get_strategies_router(),
+        prefix="/api/v1",
+        tags=["strategies"],
+    )
+    # Model Management router (Phase 10H)
+    app.include_router(
+        get_models_router(),
+        prefix="/api/v1",
+        tags=["models"],
+    )
+    # WebSocket router (Phase 10E)
+    app.include_router(get_websocket_router(), tags=["websocket"])
 
     # Register Tortoise ORM
     # generate_schemas=False because we handle initialization in lifespan

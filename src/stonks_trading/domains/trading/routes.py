@@ -250,14 +250,21 @@ async def list_all_positions() -> list[Position]:
 # Genome Routes
 # =============================================================================
 
+# Note: These endpoints are kept for backward compatibility.
+# New code should use /api/v1/models instead (Phase 10H).
+
 
 @genomes_router.post(
     "",
     response_model=GenomeResponse,
     status_code=status.HTTP_201_CREATED,
+    deprecated=True,
 )
 async def create_genome(request: GenomeCreateRequest) -> GenomeResponse:
-    """Save a trained genome."""
+    """Save a trained genome.
+
+    DEPRECATED: Use POST /api/v1/models instead.
+    """
     genome = Genome(
         genome_data=b"",  # Will be filled from request in Phase 4
         fitness=request.fitness,
@@ -274,6 +281,7 @@ async def create_genome(request: GenomeCreateRequest) -> GenomeResponse:
 @genomes_router.get(
     "",
     response_model=GenomeListResponse,
+    deprecated=True,
 )
 async def list_genomes(
     symbol: str | None = None,
@@ -294,9 +302,13 @@ async def list_genomes(
 @genomes_router.get(
     "/active",
     response_model=GenomeResponse,
+    deprecated=True,
 )
 async def get_active_genome() -> GenomeResponse:
-    """Get currently active genome for trading."""
+    """Get currently active genome for trading.
+
+    DEPRECATED: Use GET /api/v1/models?is_active=true instead.
+    """
     genome = await repo.get_active_genome()
     if not genome:
         raise HTTPException(
@@ -309,9 +321,13 @@ async def get_active_genome() -> GenomeResponse:
 @genomes_router.post(
     "/activate",
     response_model=GenomeResponse,
+    deprecated=True,
 )
 async def activate_genome(request: GenomeActivateRequest) -> GenomeResponse:
-    """Activate a genome for live trading."""
+    """Activate a genome for live trading.
+
+    DEPRECATED: Use POST /api/v1/models/{id}/activate instead.
+    """
     success = await repo.activate_genome(request.genome_id)
     if not success:
         raise HTTPException(
@@ -330,9 +346,13 @@ async def activate_genome(request: GenomeActivateRequest) -> GenomeResponse:
 @genomes_router.get(
     "/{genome_id}",
     response_model=GenomeResponse,
+    deprecated=True,
 )
 async def get_genome(genome_id: int) -> GenomeResponse:
-    """Get genome by ID."""
+    """Get genome by ID.
+
+    DEPRECATED: Use GET /api/v1/models/{model_id} instead.
+    """
     genome = await repo.get_genome_by_id(genome_id)
     if not genome:
         raise HTTPException(

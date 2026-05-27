@@ -492,3 +492,64 @@ class BotProcessModel(Model):
             ("bot_type", "bot_instance_id"),
             ("status", "updated_at"),
         )
+
+
+# =============================================================================
+# Capital Pool Model (Phase 10F)
+# =============================================================================
+
+
+class CapitalPoolModel(Model):
+    """Capital pool for managing trading capital.
+
+    Tracks total, available, and reserved capital for bots.
+    """
+
+    id = fields.BigIntField(pk=True)
+    pool_id = fields.CharField(max_length=100, unique=True, index=True)
+    name = fields.CharField(max_length=100)
+    total_capital = fields.DecimalField(18, 8, default=0)
+    available_capital = fields.DecimalField(18, 8, default=0)
+    reserved_capital = fields.DecimalField(18, 8, default=0)
+    currency = fields.CharField(max_length=10, default="USDT")
+    min_allocation = fields.DecimalField(18, 8, default=100)
+    rebalance_threshold_pct = fields.DecimalField(5, 2, default=5.0)
+    is_active = fields.BooleanField(default=True, index=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "capital_pools"
+
+
+# =============================================================================
+# Capital Allocation Model (Phase 10F)
+# =============================================================================
+
+
+class CapitalAllocationModel(Model):
+    """Capital allocation to a specific bot instance.
+
+    Tracks allocated amount, current value, and ROI for a bot.
+    """
+
+    id = fields.BigIntField(pk=True)
+    pool = fields.ForeignKeyField("models.CapitalPoolModel", related_name="allocations", null=True)
+    bot_type = fields.CharField(max_length=50, index=True)
+    bot_instance_id = fields.CharField(max_length=100, index=True)
+    allocated_amount = fields.DecimalField(18, 8)
+    current_value = fields.DecimalField(18, 8, null=True)
+    unrealized_pnl = fields.DecimalField(18, 8, default=0)
+    roi_pct = fields.DecimalField(8, 4, null=True)
+    status = fields.CharField(max_length=20, default="active", index=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+    closed_at = fields.DatetimeField(null=True)
+
+    class Meta:
+        table = "capital_allocations"
+        unique_together = (("bot_type", "bot_instance_id"),)
+        indexes = (
+            ("pool_id", "status"),
+            ("bot_type", "bot_instance_id"),
+        )

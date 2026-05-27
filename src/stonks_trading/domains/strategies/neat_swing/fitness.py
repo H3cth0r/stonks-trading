@@ -6,9 +6,11 @@ NEAT genomes during training.
 Original source: NEAT/main.py lines 185-236
 """
 
+from typing import Any
+
 import numpy as np
 
-from stonks_trading.domains.trading.neat.trading_env import TradingEnv
+from stonks_trading.domains.strategies.neat_swing.trading_env import TradingEnv
 
 # Reward Weights (Srivastava et al. adapted)
 # These match the constants in NEAT/main.py lines 34-38
@@ -119,7 +121,7 @@ def calculate_metrics(
     equity_curve: list[float],
     market_prices: np.ndarray,
     initial_capital: float = INITIAL_CAPITAL,
-) -> dict:
+) -> dict[str, Any]:
     """Calculate performance metrics for reporting.
 
     Returns dict with:

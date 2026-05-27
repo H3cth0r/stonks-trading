@@ -61,13 +61,37 @@ router = APIRouter(prefix="/training", tags=["training"])
 runs_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
-# =============================================================================
-# Training Run Routes
-# =============================================================================
-
-
-@runs_router.post(
+@router.get(
     "",
+    response_model=TrainingRunListResponse,
+)
+async def list_training_runs_endpoint(
+    status: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    bot_type: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> TrainingRunListResponse:
+    """List training runs with optional filtering.
+
+    Thin route - delegates to use case for any business logic.
+    """
+    symbol_obj = Symbol(value=symbol.upper()) if symbol else None
+
+    runs = await list_training_runs(
+        status=status,
+        symbol=symbol_obj,
+        bot_type=bot_type,
+        limit=limit,
+        offset=offset,
+    )
+
+    run_responses = TrainingRunMapper.to_response_list(runs)
+    return TrainingRunListResponse(runs=run_responses, total=len(run_responses))
+
+
+@router.post(
+    "/runs",
     response_model=GenomeComparisonResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -76,13 +100,17 @@ async def create_training_run_endpoint(
 ) -> GenomeComparisonResponse:
     """Start a new training run and return comparison result.
 
-    HTTP CONCERNS ONLY:
-    - Validate request (Pydantic)
-    - Call use case
-    - Return response or raise HTTPException
-
-    Business logic lives in TrainGenomeUseCase.
+    Phase 10D: Now accepts strategy_type for generic training interface.
+    Routes to strategy-specific training implementation.
+    Currently only NEAT is implemented, but FIBRAS and others will follow.
     """
+    # Validate strategy_type is supported (Phase 10D: only NEAT)
+    if request.strategy_type != "neat_swing":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Strategy {request.strategy_type} not yet supported for training",
+        )
+
     # Create services (in production, inject via dependency)
     training_executor = TrainingExecutor(
         generations=request.generations,
@@ -114,6 +142,7 @@ async def create_training_run_endpoint(
         generations=request.generations,
         population_size=request.population_size,
         improvement_threshold=0.5,
+        strategy_type=request.strategy_type,
     )
 
     try:
@@ -134,35 +163,6 @@ async def create_training_run_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Training failed: {str(e)}",
         ) from None
-
-
-@router.get(
-    "",
-    response_model=TrainingRunListResponse,
-)
-async def list_training_runs_endpoint(
-    status: str | None = Query(default=None),
-    symbol: str | None = Query(default=None),
-    bot_type: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
-) -> TrainingRunListResponse:
-    """List training runs with optional filtering.
-
-    Thin route - delegates to use case for any business logic.
-    """
-    symbol_obj = Symbol(value=symbol.upper()) if symbol else None
-
-    runs = await list_training_runs(
-        status=status,
-        symbol=symbol_obj,
-        bot_type=bot_type,
-        limit=limit,
-        offset=offset,
-    )
-
-    run_responses = TrainingRunMapper.to_response_list(runs)
-    return TrainingRunListResponse(runs=run_responses, total=len(run_responses))
 
 
 @router.get(

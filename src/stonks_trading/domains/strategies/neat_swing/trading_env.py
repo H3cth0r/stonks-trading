@@ -22,7 +22,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from stonks_trading.domains.trading.neat.features import get_feature_columns
+from stonks_trading.domains.strategies.neat_swing.features import get_feature_columns
 
 
 @dataclass
@@ -157,8 +157,6 @@ class TradingEnv:
         else:
             # Sell at slightly lower price
             return price * (1 - slippage_pct)
-
-        return price
 
     def step(self, step: int, action: tuple[float, float]) -> float:
         """Execute one step of the trading environment.

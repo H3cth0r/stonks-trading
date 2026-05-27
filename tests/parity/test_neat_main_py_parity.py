@@ -16,8 +16,8 @@ STRATEGY_RESEARCH = Path("/Users/h3cth0r/Documents/strategy-research")
 if str(STRATEGY_RESEARCH) not in sys.path:
     sys.path.insert(0, str(STRATEGY_RESEARCH))
 
-from stonks_trading.domains.trading.neat.fitness import calculate_fitness
-from stonks_trading.domains.trading.neat.trading_env import TradingEnv
+from stonks_trading.domains.strategies.neat_swing.fitness import calculate_fitness
+from stonks_trading.domains.strategies.neat_swing.trading_env import TradingEnv
 
 
 def load_sample_data() -> pd.DataFrame:
@@ -513,7 +513,7 @@ class TestFeatureParity:
 
     def test_feature_column_names(self) -> None:
         """Verify feature columns match NEAT/main.py."""
-        from stonks_trading.domains.trading.neat.features import get_feature_columns
+        from stonks_trading.domains.strategies.neat_swing.features import get_feature_columns
 
         columns = get_feature_columns()
 
@@ -523,7 +523,7 @@ class TestFeatureParity:
 
     def test_input_count(self) -> None:
         """Verify total input count (7 for NEAT network)."""
-        from stonks_trading.domains.trading.neat.features import prepare_neat_inputs
+        from stonks_trading.domains.strategies.neat_swing.features import prepare_neat_inputs
 
         features = np.array([0.1, 0.5, 0.5, 0.0, 0.01])
         state = prepare_neat_inputs(features, is_invested=True, unrealized_pnl_pct=0.05)

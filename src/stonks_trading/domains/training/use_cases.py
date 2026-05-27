@@ -46,7 +46,7 @@ from stonks_trading.shared.notifications import DiscordNotifier
 
 @dataclass
 class TrainGenomeRequest:
-    """Request to train a genome.
+    """Request to train a genome (Phase 10D - strategy-aware).
 
     Use case input - contains all parameters for training.
     """
@@ -56,6 +56,7 @@ class TrainGenomeRequest:
     generations: int = 30
     population_size: int = 150
     improvement_threshold: float = 0.5  # 0.5% improvement required
+    strategy_type: str = "neat_swing"  # Phase 10D: Strategy type for routing
 
 
 @dataclass
