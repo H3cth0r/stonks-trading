@@ -17,6 +17,7 @@ from stonks_trading.domains.botcontrol.routes import get_botcontrol_router
 from stonks_trading.domains.capital.routes import get_capital_router
 from stonks_trading.domains.health.routes import get_health_router
 from stonks_trading.domains.reconciliation.routes import get_reconciliation_router
+from stonks_trading.domains.strategies.routes import get_strategies_router
 from stonks_trading.domains.trading.routes import get_trading_router
 from stonks_trading.domains.training.routes import router as training_router
 from stonks_trading.shared.config import settings
@@ -136,6 +137,12 @@ def create_app() -> FastAPI:
         get_capital_router(),
         prefix="/api/v1",
         tags=["capital"],
+    )
+    # Strategy Management router (Phase 10G)
+    app.include_router(
+        get_strategies_router(),
+        prefix="/api/v1",
+        tags=["strategies"],
     )
     # WebSocket router (Phase 10E)
     app.include_router(get_websocket_router(), tags=["websocket"])
