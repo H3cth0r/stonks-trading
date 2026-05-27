@@ -3,6 +3,8 @@
 Orchestration for portfolio operations.
 """
 
+from typing import Any
+
 from stonks_trading.domains.portfolio.entities import Allocation, Portfolio
 from stonks_trading.domains.portfolio.services import PortfolioValuator, Rebalancer
 
@@ -13,7 +15,7 @@ class GetPortfolioUseCase:
     Orchestrates retrieving portfolio state.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.valuator = PortfolioValuator()
 
     async def execute(
@@ -42,7 +44,7 @@ class RebalancePortfolioUseCase:
     Orchestrates portfolio rebalancing.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.rebalancer = Rebalancer()
 
     async def execute(
@@ -50,7 +52,7 @@ class RebalancePortfolioUseCase:
         portfolio: Portfolio,
         allocations: list[Allocation],
         prices: dict[str, float],
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Execute portfolio rebalance.
 
         Args:

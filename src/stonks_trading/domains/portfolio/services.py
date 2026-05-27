@@ -3,6 +3,8 @@
 Pure business logic for portfolio operations.
 """
 
+from typing import Any
+
 from stonks_trading.domains.portfolio.entities import Allocation, Portfolio
 from stonks_trading.domains.trading.value_objects import Money
 
@@ -13,7 +15,7 @@ class PortfolioValuator:
     Calculates current portfolio value from positions.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def calculate_position_value(
@@ -35,7 +37,7 @@ class PortfolioValuator:
     def calculate_total_value(
         self,
         cash: Money,
-        positions: list[dict],
+        positions: list[dict[str, Any]],
         prices: dict[str, float],
     ) -> Money:
         """Calculate total portfolio value.
@@ -96,7 +98,7 @@ class Rebalancer:
         portfolio: Portfolio,
         allocations: list[Allocation],
         prices: dict[str, float],
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Calculate trades needed to rebalance.
 
         Args:

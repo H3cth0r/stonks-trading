@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 
 
 class LiveEquityChart:
@@ -27,7 +28,7 @@ class LiveEquityChart:
         self.key = key
         self._chart_data: list[dict[str, Any]] = []
         self._trade_markers: list[dict[str, Any]] = []
-        self._placeholder = None
+        self._placeholder: DeltaGenerator | None = None
 
     def initialize(self) -> None:
         """Initialize the chart placeholder in Streamlit."""
@@ -145,7 +146,7 @@ class PositionChart:
 
         df = pd.DataFrame(self._positions)
         if "market_value" in df.columns and "symbol" in df.columns:
-            st.pie_chart(df, values="market_value", names="symbol")
+            st.bar_chart(df.set_index("symbol")["market_value"])
         else:
             st.info("Position data missing required fields")
 

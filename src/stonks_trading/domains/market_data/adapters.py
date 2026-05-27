@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -368,10 +368,11 @@ class BinanceAdapter(IExchangeAdapter):
     ) -> list[dict[str, Any]]:
         """Get recent public trades."""
         venue_symbol = self.instrument_mapper.to_venue_symbol(symbol, "binance")
-        return await self._public_request(
+        raw_data = await self._public_request(
             "/api/v3/trades",
             {"symbol": venue_symbol.value.upper(), "limit": limit},
-        )  # type: ignore[no-any-return]
+        )
+        return cast("list[dict[str, Any]]", raw_data)
 
     async def get_fee_tier(self) -> dict[str, Any]:
         """Get trading fee tier from Binance."""
@@ -411,23 +412,8 @@ class BinanceAdapter(IExchangeAdapter):
         if end_time:
             params["endTime"] = end_time
 
-        data = await self._public_request("/api/v3/klines", params)
-
-        # Normalize to consistent format
-        candles = []
-        for k in data:
-            candles.append(
-                {
-                    "timestamp": k[0],  # Open time
-                    "open": float(k[1]),
-                    "high": float(k[2]),
-                    "low": float(k[3]),
-                    "close": float(k[4]),
-                    "volume": float(k[5]),
-                    "close_time": k[6],
-                }
-            )
-        return candles
+        candle_data = await self._public_request("/api/v3/klines", params)
+        return cast("list[dict[str, Any]]", candle_data)
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -464,15 +450,16 @@ class BinanceAdapter(IExchangeAdapter):
             "limit": 1000,
         }
 
-        data = await self._signed_request("GET", "/api/v3/myTrades", params)
+        raw_trades = cast(
+            "dict[str, Any] | list[Any]",
+            await self._signed_request("GET", "/api/v3/myTrades", params),
+        )
 
-        # Ensure we return a list
-        if isinstance(data, list):
-            return data
-        elif isinstance(data, dict) and "msg" in data:
-            # Error response
-            logger.warning(f"Binance myTrades error: {data.get('msg')}")
-            return []
+        if isinstance(raw_trades, list):
+            return raw_trades
+        # Error response or empty - log if error
+        if raw_trades and "msg" in raw_trades:
+            logger.warning(f"Binance myTrades error: {raw_trades.get('msg')}")
         return []
 
 
