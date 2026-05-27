@@ -489,3 +489,36 @@ class GenomePruneResponse(BaseResponse):
     pruned_count: int
     kept_count: int
     pruned_ids: list[int] = Field(default_factory=list)
+
+
+# =============================================================================
+# Backfill DTOs (Phase 10B)
+# =============================================================================
+
+
+class BackfillMassiveRequest(BaseModel):
+    """Request to start a Massive backfill job."""
+
+    symbol: str = Field(..., min_length=1, examples=["BTC_USD"])
+    days: int = Field(default=730, ge=1, le=730)
+
+
+class BackfillMassiveResponse(BaseResponse):
+    """Response when starting a Massive backfill job."""
+
+    job_id: str
+    symbol: str
+    days: int
+    estimated_chunks: int
+    estimated_duration_minutes: int
+
+
+class JobStatusResponse(BaseResponse):
+    """Job status response for backfill operations."""
+
+    job_id: str
+    status: str  # "running", "completed", "failed"
+    progress: float = 0.0
+    total_chunks: int | None = None
+    candles_downloaded: int | None = None
+    error: str | None = None

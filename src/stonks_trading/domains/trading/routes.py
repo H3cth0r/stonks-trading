@@ -4,16 +4,24 @@ API layer - NOT imported by the bot container.
 These routes provide HTTP access to domain functionality.
 """
 
+import uuid
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from stonks_trading.bots.base.context import BotContext
+from stonks_trading.domains.market_data.services import (
+    backfill_from_massive,
+    get_job_status,
+    set_job_status,
+)
 from stonks_trading.domains.trading import repositories as repo
 from stonks_trading.domains.trading.adapters import ExchangeAdapterFactory
 from stonks_trading.domains.trading.dtos import (
     ActivityListResponse,
+    BackfillMassiveRequest,
+    BackfillMassiveResponse,
     BalanceResponse,
     BotInstanceResponse,
     BotListResponse,
@@ -23,6 +31,7 @@ from stonks_trading.domains.trading.dtos import (
     GenomeCreateRequest,
     GenomeListResponse,
     GenomeResponse,
+    JobStatusResponse,
     MarketDataListResponse,
     MarketDataResponse,
     MarketPriceListResponse,
@@ -73,6 +82,9 @@ from stonks_trading.domains.trading.use_cases import (
     PlaceOrderUseCase,
 )
 from stonks_trading.domains.trading.value_objects import Money, Symbol
+
+# Phase 10B - Backfill router
+backfill_router = APIRouter(prefix="/backfill", tags=["backfill"])
 
 # Create router
 trades_router = APIRouter(prefix="/trades", tags=["trades"])
@@ -842,6 +854,70 @@ async def get_training_run_endpoint(
 
 
 # =============================================================================
+# Backfill Routes (Phase 10B)
+# =============================================================================
+
+
+@backfill_router.post(
+    "/massive",
+    response_model=BackfillMassiveResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def backfill_massive(request: BackfillMassiveRequest) -> BackfillMassiveResponse:
+    """Start a Massive backfill job.
+
+    Returns job_id for status polling.
+    """
+    import asyncio
+
+    estimated_chunks = (request.days // 30) + 1
+    estimated_minutes = (estimated_chunks * 65) // 60
+
+    # Generate job ID upfront for response
+    job_id = str(uuid.uuid4()) if hasattr(uuid, "uuid4") else f"job-{id(request)}"
+
+    # Initialize job status as running
+    await set_job_status(
+        job_id,
+        {
+            "job_id": job_id,
+            "status": "running",
+            "progress": 0.0,
+            "symbol": request.symbol,
+            "total_chunks": estimated_chunks,
+            "candles_downloaded": 0,
+            "error": None,
+        },
+    )
+
+    # Start backfill in background with same job_id
+    asyncio.create_task(backfill_from_massive(request.symbol, request.days, job_id=job_id))
+
+    return BackfillMassiveResponse(
+        job_id=job_id,
+        symbol=request.symbol,
+        days=request.days,
+        estimated_chunks=estimated_chunks,
+        estimated_duration_minutes=estimated_minutes,
+    )
+
+
+@backfill_router.get(
+    "/jobs/{job_id}",
+    response_model=JobStatusResponse,
+)
+async def get_backfill_job(job_id: str) -> JobStatusResponse:
+    """Get status of a backfill job."""
+    status = await get_job_status(job_id)
+    if not status:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found",
+        )
+    return JobStatusResponse(**status)
+
+
+# =============================================================================
 # Main Router Assembly
 # =============================================================================
 
@@ -864,5 +940,7 @@ def get_trading_router() -> APIRouter:
     router.include_router(activity_router)
     router.include_router(orders_router)
     router.include_router(training_router)
+    # Phase 10B - Backfill routes
+    router.include_router(backfill_router)
 
     return router

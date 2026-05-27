@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     bitso_api_key: str = ""
     bitso_api_secret: str = ""
 
+    # Massive Data (for historical backfill)
+    massive_api_key: str = ""
+
     # Storage (Tigris S3)
     s3_endpoint: str = ""
     s3_access_key: str = ""

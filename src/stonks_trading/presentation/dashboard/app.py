@@ -33,13 +33,13 @@ st.markdown("""
 
 This dashboard provides real-time monitoring of:
 
-- **Operations Hub** - Bot fleet overview, activity timeline, balances
+- **Portfolio Overview** - Master portfolio view with real-time metrics
 - **Live Trading** - Real-time equity curves, positions, and trades
-- **Training Progress** - NEAT training runs and fitness evolution
-- **Model Registry** - Genome management and activation
-- **Backtest** - Historical backtest results
-- **Trade Log** - Complete trade history with filters
-- **Risk Dashboard** - Drawdown monitoring and kill switch
+- **Strategy Management** - NEAT training runs and fitness evolution
+- **Performance Analytics** - Historical backtest and live performance
+- **Trade Explorer** - Complete trade history with filters
+- **Risk Monitor** - Drawdown monitoring and kill switch
+- **Data Explorer** - Market data backfill and visualization
 
 ### Quick Stats
 """)
