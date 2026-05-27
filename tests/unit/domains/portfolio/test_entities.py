@@ -1,5 +1,7 @@
 """Unit tests for portfolio entities."""
 
+import pytest
+
 from stonks_trading.domains.portfolio.entities import Allocation, Portfolio
 from stonks_trading.domains.portfolio.services import PortfolioValuator, Rebalancer
 from stonks_trading.domains.trading.value_objects import Money
@@ -73,7 +75,7 @@ class TestAllocation:
             target_pct=0.5,
             current_pct=0.45,
         )
-        assert alloc.drift() == -0.05
+        assert alloc.drift() == pytest.approx(-0.05)
 
 
 class TestPortfolioValuator:

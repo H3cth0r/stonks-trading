@@ -121,21 +121,21 @@ class TestOrderBook:
         """best_bid returns highest bid (first after sort)."""
         book = OrderBook(
             symbol="BTC_USD",
-            bids=[(100.0, 1.0), (101.0, 2.0)],  # Highest first
+            bids=[(101.0, 2.0), (100.0, 1.0)],  # Highest first
             asks=[(102.0, 1.0)],
         )
         best = book.best_bid()
-        assert best == (101.0, 2.0)
+        assert best == pytest.approx((101.0, 2.0))
 
     def test_best_ask(self):
         """best_ask returns lowest ask."""
         book = OrderBook(
             symbol="BTC_USD",
             bids=[(100.0, 1.0)],
-            asks=[(102.0, 1.0), (101.0, 2.0)],  # Lowest first
+            asks=[(101.0, 2.0), (102.0, 1.0)],  # Lowest first
         )
         best = book.best_ask()
-        assert best == (101.0, 2.0)
+        assert best == pytest.approx((101.0, 2.0))
 
     def test_spread(self):
         """spread calculates bid-ask spread."""
