@@ -263,29 +263,40 @@ class BotFactory:
         # Resolve bot class from registry
         bot_class = BotRegistry.get(bot_type)
 
-        # Strategy type defaults to bot_type for convenience
-        if strategy_type is None:
-            strategy_type = bot_type
-
         # Construct domain objects (factory responsibility, not caller)
         context = BotContext(bot_type=bot_type, instance_id=instance_id)
         symbol_objects = [Symbol(value=s) for s in symbols]
         mode_enum = TradingMode(mode)
 
         # Get strategy factory from StrategyRegistry and create instance
-        strategy_config = kwargs.pop("strategy_config", {})
-        strategy = StrategyRegistry.create(strategy_type, strategy_config)
+        # Only use StrategyRegistry if strategy not passed and strategy_type is registered
+        # This maintains backward compatibility with bots that have default strategies
+        if "strategy" in kwargs:
+            strategy = kwargs.pop("strategy")
+        elif strategy_type is not None and StrategyRegistry.is_registered(strategy_type):
+            strategy_config = kwargs.pop("strategy_config", {})
+            strategy = StrategyRegistry.create(strategy_type, strategy_config)
+        else:
+            # Let bot use its default strategy (backward compatibility)
+            strategy = None
+
+        # Build kwargs for bot constructor
+        bot_kwargs: dict[str, Any] = {
+            "context": context,
+            "symbols": symbol_objects,
+            "mode": mode_enum,
+            **kwargs,
+        }
+
+        # Only add strategy and capital_allocation if they are set
+        if strategy is not None:
+            bot_kwargs["strategy"] = strategy
+        if capital_allocation is not None:
+            bot_kwargs["capital_allocation"] = capital_allocation
 
         # Create bot with strategy injection
         # initial_state should be passed in kwargs - it's bot-type-specific
-        bot = bot_class(
-            context=context,
-            symbols=symbol_objects,
-            mode=mode_enum,
-            strategy=strategy,
-            capital_allocation=capital_allocation,
-            **kwargs,
-        )
+        bot = bot_class(**bot_kwargs)
 
         return bot
 
