@@ -150,7 +150,7 @@ async def get_backtest_result(backtest_id: str) -> BacktestResult | None:
 
 async def list_backtest_results(
     symbol: str | None = None,
-    genome_id: int | None = None,
+    model_id: int | None = None,
     mode: BacktestMode | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -159,7 +159,7 @@ async def list_backtest_results(
 
     Args:
         symbol: Filter by symbol
-        genome_id: Filter by genome ID
+        model_id: Filter by model ID (Phase 10H: renamed from genome_id)
         mode: Filter by backtest mode
         limit: Maximum results
         offset: Results to skip
@@ -167,6 +167,8 @@ async def list_backtest_results(
     Returns:
         List of BacktestResult entities
     """
+    # Phase 10H: Accept model_id but use genome_id internally for DB compatibility
+    genome_id = model_id
     client = DuckDBClient()
     client.connect()
 
@@ -275,7 +277,7 @@ def _row_to_backtest_result(row: dict[str, Any]) -> BacktestResult:
 
     return BacktestResult(
         backtest_id=row.get("backtest_id", ""),
-        genome_id=row.get("genome_id", 0),
+        model_id=row.get("model_id") or row.get("genome_id", 0),  # Phase 10H: supports both
         symbol=row.get("symbol", ""),
         mode=mode,
         start_date=row.get("start_date"),

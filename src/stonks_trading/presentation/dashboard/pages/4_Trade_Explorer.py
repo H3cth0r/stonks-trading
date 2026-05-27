@@ -1,19 +1,23 @@
-"""Trade Log - Complete trade history with filters.
+"""Trade Explorer - Complete trade history with advanced filters.
 
-All imports at module level per CLEAN architecture - no lazy imports.
+Phase 10H: Renamed from Trade Log with enhanced filtering and export.
 """
+
+import csv
+import io
+import json
 
 import streamlit as st
 
 from stonks_trading.presentation.dashboard.utils import fetch_sync
 
-st.set_page_config(page_title="Trade Log", page_icon="📋")
+st.set_page_config(page_title="Trade Explorer", page_icon="🔍")
 
-st.title("📋 Trade Log")
+st.title("🔍 Trade Explorer")
 
 # Filters sidebar
 st.sidebar.header("Filters")
-symbol_filter = st.sidebar.text_input("Symbol", placeholder="BTCUSDT")
+symbol_filter = st.sidebar.text_input("Symbol", placeholder="BTC_USD")
 side_filter = st.sidebar.selectbox("Side", ["All", "BUY", "SELL"])
 mode_filter = st.sidebar.selectbox("Mode", ["All", "DRY_RUN", "LIVE"])
 
@@ -65,8 +69,6 @@ if trades_data and "trades" in trades_data and trades_data["trades"]:
     st.sidebar.header("Export")
 
     if st.sidebar.button("Export to JSON"):
-        import json
-
         json_data = json.dumps(trades, indent=2, default=str)
         st.sidebar.download_button(
             label="Download JSON",
@@ -76,23 +78,19 @@ if trades_data and "trades" in trades_data and trades_data["trades"]:
         )
 
     # CSV export
-    if st.sidebar.button("Export to CSV"):
-        import csv
-        import io
+    if st.sidebar.button("Export to CSV") and trades:
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=trades[0].keys())
+        writer.writeheader()
+        writer.writerows(trades)
+        csv_data = output.getvalue()
 
-        if trades:
-            output = io.StringIO()
-            writer = csv.DictWriter(output, fieldnames=trades[0].keys())
-            writer.writeheader()
-            writer.writerows(trades)
-            csv_data = output.getvalue()
-
-            st.sidebar.download_button(
-                label="Download CSV",
-                data=csv_data,
-                file_name="trades.csv",
-                mime="text/csv",
-            )
+        st.sidebar.download_button(
+            label="Download CSV",
+            data=csv_data,
+            file_name="trades.csv",
+            mime="text/csv",
+        )
 
     # Trade statistics
     st.header("Trade Statistics")

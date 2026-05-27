@@ -6,7 +6,17 @@ For the full implementation plan, see the main PLAN.md in the strategy-research 
 
 ## Overview
 
-Stonks Trading is a NEAT-based crypto swing trading system built with CLEAN architecture principles.
+Stonks Trading is a NEAT-based crypto swing trading system built with CLEAN architecture principles, supporting multiple trading strategies.
+
+### Multi-Strategy Architecture (Phase 10)
+
+The system supports multiple trading strategies through a unified interface:
+
+- **NEAT Swing Trading** - Original NEAT-based strategy
+- **FIBRAS Value Strategy** - (planned)
+- **Custom strategies** - Via plugin interface
+
+Each strategy implements a common interface and can be trained, backtested, and deployed independently.
 
 ## Architecture Principles
 
@@ -65,30 +75,46 @@ stonks-trading/
 │   │   ├── logger.py
 │   │   ├── database.py
 │   │   ├── postgres_models.py
-│   │   └── serializers.py
-│   └── domains/trading/     # Domain layer
-│       ├── entities.py
-│       ├── value_objects.py
-│       ├── repositories.py
-│       ├── services.py
-│       ├── use_cases.py
-│       ├── adapters.py
-│       ├── routes.py        # API only
-│       ├── dtos.py          # API only
-│       ├── mappers.py       # API only
-│       └── neat/            # NEAT modules
-│           ├── trading_env.py
-│           ├── fitness.py
-│           ├── features.py
-│           ├── trainer.py
-│           ├── config_builder.py
-│           └── reporter.py
+│   │   ├── serializers.py
+│   │   ├── redis_client.py   # Redis + CacheManager
+│   │   └── websocket_api.py # WebSocket + RateLimitedBroadcaster
+│   ├── bots/                 # Bot implementations
+│   │   ├── base/
+│   │   │   ├── strategy.py  # Base strategy interface
+│   │   │   └── context.py    # BotContext
+│   │   └── neat_swing/      # NEAT swing strategy
+│   │       └── strategy.py
+│   ├── domains/             # Domain modules
+│   │   ├── backtesting/      # Backtesting domain
+│   │   ├── botcontrol/       # Bot lifecycle management
+│   │   ├── capital/          # Capital management
+│   │   ├── health/           # Health checks
+│   │   ├── reconciliation/   # Trade reconciliation
+│   │   ├── strategies/        # Strategy registry
+│   │   ├── trading/          # Trading domain (core)
+│   │   └── training/          # Training domain
+│   └── presentation/
+│       └── dashboard/         # Streamlit dashboard
+│           └── pages/         # Dashboard pages
 ├── tests/
 │   ├── parity/              # Parity tests vs NEAT/main.py
-│   └── integration/         # Integration tests
-└── .github/workflows/
-    └── ci.yml               # CI pipeline
+│   ├── unit/                # Unit tests
+│   ├── integration/          # Integration tests
+│   └── e2e/                 # End-to-end tests
+└── infra/
+    └── docker-compose.dev.yml
 ```
+
+### Multi-Domain Structure
+
+Each domain follows CLEAN architecture:
+- `entities.py` — Pure dataclasses
+- `repositories.py` — Standalone async functions
+- `services.py` — Business logic
+- `use_cases.py` — Orchestration
+- `routes.py` — API endpoints (API layer only)
+- `dtos.py` — Pydantic request/response
+- `mappers.py` — Entity ↔ DTO conversion
 
 ## NEAT Extraction
 
@@ -157,5 +183,6 @@ GitHub Actions workflow:
 
 ## References
 
-- **Main Plan**: `/Users/h3cth0r/Documents/strategy-research/PLAN.md`
-- **Prototype**: `/Users/h3cth0r/Documents/strategy-research/NEAT/main.py`
+- **Implementation Plans**: `tmp/MASTER_ARCHITECTURE_PLAN.md`
+- **Phase Guides**: `tmp/PHASE_*_IMPLEMENTATION_GUIDE.md`
+- **Original NEAT**: `/Users/h3cth0r/Documents/strategy-research/NEAT/main.py`

@@ -129,14 +129,19 @@ async def get_backtest_result_endpoint(
 )
 async def list_backtest_results_endpoint(
     symbol: str | None = Query(default=None),
-    genome_id: int | None = Query(default=None, gt=0),
+    model_id: int | None = Query(default=None, gt=0, description="Filter by model ID"),
+    genome_id: int | None = Query(
+        default=None, gt=0, deprecated=True, description="Deprecated, use model_id"
+    ),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ) -> BacktestResultListResponse:
     """List backtest results with optional filtering."""
+    # Phase 10H: Support both model_id and deprecated genome_id
+    filter_id = model_id or genome_id
     results = await list_backtest_results(
         symbol=symbol.upper() if symbol else None,
-        genome_id=genome_id,
+        model_id=filter_id,
         limit=limit,
         offset=offset,
     )

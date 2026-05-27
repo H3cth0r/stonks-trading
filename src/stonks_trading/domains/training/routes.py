@@ -61,13 +61,37 @@ router = APIRouter(prefix="/training", tags=["training"])
 runs_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
-# =============================================================================
-# Training Run Routes
-# =============================================================================
-
-
-@runs_router.post(
+@router.get(
     "",
+    response_model=TrainingRunListResponse,
+)
+async def list_training_runs_endpoint(
+    status: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    bot_type: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> TrainingRunListResponse:
+    """List training runs with optional filtering.
+
+    Thin route - delegates to use case for any business logic.
+    """
+    symbol_obj = Symbol(value=symbol.upper()) if symbol else None
+
+    runs = await list_training_runs(
+        status=status,
+        symbol=symbol_obj,
+        bot_type=bot_type,
+        limit=limit,
+        offset=offset,
+    )
+
+    run_responses = TrainingRunMapper.to_response_list(runs)
+    return TrainingRunListResponse(runs=run_responses, total=len(run_responses))
+
+
+@router.post(
+    "/runs",
     response_model=GenomeComparisonResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -139,35 +163,6 @@ async def create_training_run_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Training failed: {str(e)}",
         ) from None
-
-
-@router.get(
-    "",
-    response_model=TrainingRunListResponse,
-)
-async def list_training_runs_endpoint(
-    status: str | None = Query(default=None),
-    symbol: str | None = Query(default=None),
-    bot_type: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
-) -> TrainingRunListResponse:
-    """List training runs with optional filtering.
-
-    Thin route - delegates to use case for any business logic.
-    """
-    symbol_obj = Symbol(value=symbol.upper()) if symbol else None
-
-    runs = await list_training_runs(
-        status=status,
-        symbol=symbol_obj,
-        bot_type=bot_type,
-        limit=limit,
-        offset=offset,
-    )
-
-    run_responses = TrainingRunMapper.to_response_list(runs)
-    return TrainingRunListResponse(runs=run_responses, total=len(run_responses))
 
 
 @router.get(

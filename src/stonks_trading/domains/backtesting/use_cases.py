@@ -130,7 +130,7 @@ class RunBacktestUseCase:
         )
 
         backtest_result = BacktestResult(
-            genome_id=request.genome_id,
+            model_id=request.genome_id,  # Phase 10H: entity uses model_id
             symbol=request.symbol,
             start_date=request.start_date,
             end_date=request.end_date,
@@ -305,18 +305,18 @@ class CompareBacktestResultsUseCase:
 
 
 class GetBacktestHistoryUseCase:
-    """Get backtest history for a genome or symbol."""
+    """Get backtest history for a model or symbol."""
 
     async def execute(
         self,
-        genome_id: int | None = None,
+        model_id: int | None = None,
         symbol: str | None = None,
         limit: int = 100,
     ) -> list[BacktestResult]:
         """Get backtest history with filters.
 
         Args:
-            genome_id: Filter by genome ID
+            model_id: Filter by model ID (Phase 10H: renamed from genome_id)
             symbol: Filter by symbol
             limit: Maximum results
 
@@ -325,6 +325,6 @@ class GetBacktestHistoryUseCase:
         """
         return await list_backtest_results(
             symbol=symbol,
-            genome_id=genome_id,
+            model_id=model_id,
             limit=limit,
         )

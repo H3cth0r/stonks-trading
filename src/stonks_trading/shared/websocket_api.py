@@ -250,6 +250,66 @@ def get_connection_manager() -> ConnectionManager:
     return _manager
 
 
+class RateLimitedBroadcaster:
+    """Rate-limited WebSocket broadcaster to prevent overwhelming clients.
+
+    Phase 10H: Added rate limiting to prevent flooding clients with updates.
+    """
+
+    def __init__(self, max_messages_per_second: float = 10.0):
+        """Initialize broadcaster.
+
+        Args:
+            max_messages_per_second: Maximum broadcast rate per channel
+        """
+        self.max_rate = max_messages_per_second
+        self._last_broadcast: dict[str, float] = {}
+
+    def should_broadcast(self, channel: str) -> bool:
+        """Check if broadcast should proceed based on rate limit.
+
+        Args:
+            channel: Channel identifier
+
+        Returns:
+            True if broadcast should proceed, False if rate limited
+        """
+        import time
+
+        now = time.time()
+        last = self._last_broadcast.get(channel, 0)
+        if now - last >= 1.0 / self.max_rate:
+            self._last_broadcast[channel] = now
+            return True
+        return False
+
+    async def broadcast(self, channel: str, message: dict[str, Any]) -> None:
+        """Broadcast message if rate limit allows.
+
+        Args:
+            channel: Channel identifier
+            message: Message to broadcast
+        """
+        if self.should_broadcast(channel):
+            await _manager.broadcast(channel, message)
+
+
+# Global rate-limited broadcaster
+_rate_limited_broadcaster: RateLimitedBroadcaster | None = None
+
+
+def get_rate_limited_broadcaster() -> RateLimitedBroadcaster:
+    """Get the global rate-limited broadcaster.
+
+    Returns:
+        RateLimitedBroadcaster instance
+    """
+    global _rate_limited_broadcaster
+    if _rate_limited_broadcaster is None:
+        _rate_limited_broadcaster = RateLimitedBroadcaster()
+    return _rate_limited_broadcaster
+
+
 def broadcast_bot_state(bot_type: str, instance_id: str, snapshot: BotStateSnapshot) -> None:
     """Broadcast bot state to all subscribed dashboard clients.
 

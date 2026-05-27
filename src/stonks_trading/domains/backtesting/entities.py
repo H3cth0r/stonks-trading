@@ -21,7 +21,7 @@ class BacktestResult:
     """
 
     backtest_id: str
-    genome_id: int
+    model_id: int  # Phase 10H: Renamed from genome_id
     symbol: str
     mode: BacktestMode
     start_date: datetime
@@ -46,6 +46,16 @@ class BacktestResult:
     trades: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None
+
+    # Phase 10H: Backward compatibility alias
+    @property
+    def genome_id(self) -> int:
+        """Backward compatibility alias for model_id."""
+        return self.model_id
+
+    @genome_id.setter
+    def genome_id(self, value: int) -> None:
+        self.model_id = value
 
     def is_profitable(self) -> bool:
         """Check if backtest was profitable."""

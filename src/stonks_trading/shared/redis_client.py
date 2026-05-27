@@ -141,7 +141,8 @@ async def set_with_expiry(key: str, value: Any, expiry_seconds: int | None = Non
     """
     client = await get_redis()
     expiry = expiry_seconds or settings.live_data_ttl_seconds
-    return await client.setex(key, expiry, value)
+    result = await client.setex(key, expiry, value)
+    return bool(result)
 
 
 async def get_equity_history(
@@ -183,4 +184,112 @@ async def push_equity(bot_type: str, instance_id: str, equity: float) -> int:
     await client.lpush(key, str(equity))
     await client.ltrim(key, 0, settings.equity_history_max_points - 1)
 
-    return await client.llen(key)
+    result = await client.llen(key)
+    return int(result)
+
+
+# Cache key patterns for Phase 10H performance optimization
+CACHE_KEYS = {
+    "portfolio": "portfolio:summary",
+    "bots": "bots:list",
+    "models": "models:list:{strategy_type}",
+    "trades": "trades:recent:{limit}",
+}
+
+
+class CacheManager:
+    """Cache manager for frequently accessed data.
+
+    Phase 10H: Add caching layer for frequently accessed data.
+    """
+
+    def __init__(self, default_ttl: int = 300):
+        """Initialize cache manager.
+
+        Args:
+            default_ttl: Default TTL in seconds (5 minutes)
+        """
+        self.default_ttl = default_ttl
+
+    async def get(self, key: str) -> Any | None:
+        """Get cached value.
+
+        Args:
+            key: Cache key
+
+        Returns:
+            Cached value or None if not found
+        """
+        import json
+
+        client = await get_redis()
+        data = await client.get(key)
+        if data:
+            try:
+                return json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return data.decode("utf-8") if isinstance(data, bytes) else data
+        return None
+
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+        """Cache value with TTL.
+
+        Args:
+            key: Cache key
+            value: Value to cache
+            ttl: TTL in seconds (uses default if not specified)
+        """
+        import json
+
+        client = await get_redis()
+        ttl = ttl or self.default_ttl
+        serialized = json.dumps(value, default=str)
+        await client.setex(key, ttl, serialized)
+
+    async def invalidate(self, pattern: str) -> None:
+        """Invalidate cache by pattern.
+
+        Args:
+            pattern: Key pattern to match (e.g., "models:*")
+        """
+        client = await get_redis()
+        keys = []
+        async for key in client.scan_iter(match=pattern):
+            keys.append(key)
+        if keys:
+            await client.delete(*keys)
+
+    async def get_or_set(self, key: str, factory: Any, ttl: int | None = None) -> Any:
+        """Get from cache or compute and cache if not present.
+
+        Args:
+            key: Cache key
+            factory: Async callable to compute value if not cached
+            ttl: TTL in seconds
+
+        Returns:
+            Cached or computed value
+        """
+        cached = await self.get(key)
+        if cached is not None:
+            return cached
+
+        value = await factory() if callable(factory) else factory
+        await self.set(key, value, ttl)
+        return value
+
+
+# Global cache manager instance
+_cache_manager: CacheManager | None = None
+
+
+def get_cache_manager() -> CacheManager:
+    """Get or create the global cache manager.
+
+    Returns:
+        CacheManager instance
+    """
+    global _cache_manager
+    if _cache_manager is None:
+        _cache_manager = CacheManager()
+    return _cache_manager

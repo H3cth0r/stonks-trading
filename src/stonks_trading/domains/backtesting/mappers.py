@@ -17,7 +17,7 @@ class BacktestResultMapper:
         """Convert domain entity to API response DTO."""
         return BacktestResultResponse(
             backtest_id=entity.backtest_id,
-            genome_id=entity.genome_id,
+            model_id=entity.genome_id,  # Phase 10H: DTO uses model_id, entity uses genome_id
             symbol=entity.symbol,
             mode=entity.mode.value,
             start_date=entity.start_date,

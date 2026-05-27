@@ -31,7 +31,7 @@ class BacktestResultResponse(BaseResponse):
     """Backtest result response."""
 
     backtest_id: str
-    genome_id: int
+    model_id: int  # Phase 10H: Renamed from genome_id
     symbol: str
     mode: str
     start_date: datetime

@@ -66,7 +66,7 @@ class TestBacktestResult:
         """Test profit check."""
         result = BacktestResult(
             backtest_id="test-1",
-            genome_id=1,
+            model_id=1,  # Phase 10H: renamed from genome_id
             symbol="BTC_USD",
             mode=BacktestMode.BACKTEST,
             start_date=datetime.utcnow(),
@@ -99,7 +99,7 @@ class TestBacktestResult:
         """Test drawdown check."""
         result = BacktestResult(
             backtest_id="test-1",
-            genome_id=1,
+            model_id=1,  # Phase 10H: renamed from genome_id
             symbol="BTC_USD",
             mode=BacktestMode.BACKTEST,
             start_date=datetime.utcnow(),
