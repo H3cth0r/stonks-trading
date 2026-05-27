@@ -5,7 +5,6 @@ All data access only - no business logic.
 """
 
 from stonks_trading.domains.portfolio.entities import Portfolio
-from stonks_trading.domains.trading.repositories import get_position
 from stonks_trading.domains.trading.value_objects import Money
 
 
