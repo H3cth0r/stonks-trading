@@ -74,7 +74,6 @@ class LiveEquityChart:
             st.info("Waiting for equity data...")
             return
 
-
         # Build equity dataframe
         df = pd.DataFrame(self._chart_data)
         df["timestamp"] = pd.to_datetime(df["timestamp"])
@@ -144,7 +143,6 @@ class PositionChart:
             st.info("No open positions")
             return
 
-
         df = pd.DataFrame(self._positions)
         if "market_value" in df.columns and "symbol" in df.columns:
             st.pie_chart(df, values="market_value", names="symbol")
@@ -156,7 +154,6 @@ class PositionChart:
         if not self._positions:
             st.info("No open positions")
             return
-
 
         df = pd.DataFrame(self._positions)
         if "market_value" in df.columns and "symbol" in df.columns:
@@ -193,7 +190,6 @@ class TradeHistoryTable:
         if not self._trades:
             st.info("No recent trades")
             return
-
 
         df = pd.DataFrame(self._trades)
         st.dataframe(df, use_container_width=True)
