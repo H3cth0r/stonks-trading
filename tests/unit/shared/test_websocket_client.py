@@ -82,3 +82,125 @@ class TestWebSocketClient:
         client._connection = MagicMock()
 
         assert client.is_connected is True
+
+    @pytest.mark.asyncio
+    async def test_subscribe_adds_new_symbols(self) -> None:
+        """Test subscribe adds new symbols."""
+        client = WebSocketClient(symbols=["btcusdt"])
+
+        await client.subscribe(["ethusdt", "btcusdt"])
+
+        assert "ethusdt" in client.symbols
+        assert "btcusdt" in client.symbols
+
+    @pytest.mark.asyncio
+    async def test_handle_message_combined_stream_format(self) -> None:
+        """Test handling combined stream format from Binance."""
+        callback = MagicMock()
+        client = WebSocketClient(symbols=["btcusdt"], callback=callback)
+
+        combined_data = {
+            "stream": "btcusdt@kline_1m",
+            "data": {
+                "e": "kline",
+                "k": {
+                    "s": "BTCUSDT",
+                    "t": 1234567890000,
+                    "T": 1234567896000,
+                    "o": "50000.00",
+                    "h": "50100.00",
+                    "l": "49900.00",
+                    "c": "50050.00",
+                    "v": "1.5",
+                    "x": True,
+                },
+            },
+        }
+
+        await client._handle_message(combined_data)
+
+        callback.assert_called_once()
+        candle = callback.call_args[0][0]
+        assert candle["symbol"] == "btcusdt"
+        assert candle["closed"] is True
+
+    @pytest.mark.asyncio
+    async def test_handle_message_single_stream_format(self) -> None:
+        """Test handling single stream format."""
+        callback = MagicMock()
+        client = WebSocketClient(symbols=["btcusdt"], callback=callback)
+
+        single_data = {
+            "e": "kline",
+            "k": {
+                "s": "ETHUSDT",
+                "t": 1234567890000,
+                "T": 1234567896000,
+                "o": "3000.00",
+                "h": "3100.00",
+                "l": "2900.00",
+                "c": "3050.00",
+                "v": "10.5",
+                "x": True,
+            },
+        }
+
+        await client._handle_message(single_data)
+
+        callback.assert_called_once()
+        candle = callback.call_args[0][0]
+        assert candle["symbol"] == "ethusdt"
+
+    @pytest.mark.asyncio
+    async def test_process_kline_skips_incomplete_candles(self) -> None:
+        """Test that only closed candles are processed."""
+        callback = MagicMock()
+        client = WebSocketClient(symbols=["btcusdt"], callback=callback)
+
+        incomplete_kline = {
+            "e": "kline",
+            "k": {
+                "s": "BTCUSDT",
+                "t": 1234567890000,
+                "T": 1234567896000,
+                "o": "50000.00",
+                "h": "50100.00",
+                "l": "49900.00",
+                "c": "50050.00",
+                "v": "1.5",
+                "x": False,  # Not closed
+            },
+        }
+
+        await client._handle_message(incomplete_kline)
+
+        callback.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bot_callbacks_invoked_on_kline(self) -> None:
+        """Test bot callbacks are called on kline."""
+        bot_callback1 = MagicMock()
+        bot_callback2 = MagicMock()
+        client = WebSocketClient(symbols=["btcusdt"])
+        client.register_bot(bot_callback1)
+        client.register_bot(bot_callback2)
+
+        kline_data = {
+            "e": "kline",
+            "k": {
+                "s": "BTCUSDT",
+                "t": 1234567890000,
+                "T": 1234567896000,
+                "o": "50000.00",
+                "h": "50100.00",
+                "l": "49900.00",
+                "c": "50050.00",
+                "v": "1.5",
+                "x": True,
+            },
+        }
+
+        await client._handle_message(kline_data)
+
+        assert bot_callback1.called
+        assert bot_callback2.called
