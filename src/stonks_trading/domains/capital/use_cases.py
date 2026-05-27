@@ -3,6 +3,8 @@
 Orchestration for capital operations.
 """
 
+from typing import Any
+
 from stonks_trading.domains.capital.entities import CapitalAllocation
 from stonks_trading.domains.capital.repositories import (
     allocate_to_bot,
@@ -77,7 +79,7 @@ class RebalanceCapitalUseCase:
     async def execute(
         self,
         pool_id: str,
-        rebalance_targets: list[dict],
+        rebalance_targets: list[dict[str, Any]],
     ) -> list[CapitalAllocation]:
         """Execute capital rebalance.
 

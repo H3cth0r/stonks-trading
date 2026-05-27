@@ -131,3 +131,56 @@ async def get_bot_allocation(
     """
     key = f"{bot_type}:{bot_instance_id}"
     return _capital_allocations.get(key)
+
+
+async def get_all_pools() -> list[CapitalPool]:
+    """Get all capital pools.
+
+    Returns:
+        List of all CapitalPools
+    """
+    return list(_capital_pools.values())
+
+
+async def get_all_allocations(pool_id: str | None = None) -> list[CapitalAllocation]:
+    """Get all capital allocations.
+
+    Args:
+        pool_id: Optional filter by pool ID
+
+    Returns:
+        List of CapitalAllocations
+    """
+    if pool_id is None:
+        return list(_capital_allocations.values())
+    return [a for a in _capital_allocations.values() if a.pool_id == pool_id]
+
+
+async def update_allocation(
+    bot_type: str,
+    bot_instance_id: str,
+    current_value: Money | None = None,
+    roi_pct: float | None = None,
+) -> CapitalAllocation | None:
+    """Update capital allocation with current value and ROI.
+
+    Args:
+        bot_type: Bot type identifier
+        bot_instance_id: Bot instance identifier
+        current_value: New current value
+        roi_pct: New ROI percentage
+
+    Returns:
+        Updated CapitalAllocation or None if not found
+    """
+    key = f"{bot_type}:{bot_instance_id}"
+    allocation = _capital_allocations.get(key)
+    if not allocation:
+        return None
+
+    if current_value is not None:
+        allocation.current_value = current_value
+    if roi_pct is not None:
+        allocation.roi_pct = roi_pct
+
+    return allocation
