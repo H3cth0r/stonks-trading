@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 
-from stonks_trading.domains.trading.neat.features import engineer_features
+from stonks_trading.domains.strategies.neat_swing.features import engineer_features
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.features.live_features import LiveFeatureComputer
 from stonks_trading.shared.ingest.adapter import Candle

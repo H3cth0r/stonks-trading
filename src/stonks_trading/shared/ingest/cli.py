@@ -257,7 +257,7 @@ def verify_features() -> None:
     import numpy as np
     import pandas as pd
 
-    from stonks_trading.domains.trading.neat.features import engineer_features
+    from stonks_trading.domains.strategies.neat_swing.features import engineer_features
 
     click.echo("Verifying feature parity...")
 

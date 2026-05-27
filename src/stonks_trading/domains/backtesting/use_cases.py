@@ -28,9 +28,9 @@ from stonks_trading.domains.backtesting.repositories import (
     save_backtest_result,
 )
 from stonks_trading.domains.backtesting.services import EquityCurveAnalyzer, MetricsCalculator
-from stonks_trading.domains.trading.neat.config_builder import create_default_config
-from stonks_trading.domains.trading.neat.features import engineer_features
-from stonks_trading.domains.trading.neat.trading_env import TradingEnv
+from stonks_trading.domains.strategies.neat_swing.config_builder import create_default_config
+from stonks_trading.domains.strategies.neat_swing.features import engineer_features
+from stonks_trading.domains.strategies.neat_swing.trading_env import TradingEnv
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 

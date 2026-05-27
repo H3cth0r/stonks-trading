@@ -14,7 +14,7 @@ from tortoise.exceptions import DBConnectionError
 from tortoise.transactions import in_transaction
 
 from stonks_trading.domains.trading.entities import Position, Trade
-from stonks_trading.domains.trading.neat.config_builder import NeatConfig
+from stonks_trading.domains.strategies.neat_swing.config_builder import NeatConfig
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.shared.config import settings as app_settings
 from stonks_trading.domains.trading.services import (

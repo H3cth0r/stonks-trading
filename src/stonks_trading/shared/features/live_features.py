@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from stonks_trading.domains.trading.neat.features import engineer_features
+from stonks_trading.domains.strategies.neat_swing.features import engineer_features
 from stonks_trading.shared.ingest.adapter import Candle
 from stonks_trading.shared.logger import logger
 
@@ -91,7 +91,7 @@ class LiveFeatureComputer:
         """Compute features from accumulated candles.
 
         Uses the SAME feature engineering logic as training
-        (domains/trading/neat/features.py) to ensure parity.
+        (domains/strategies/neat_swing/features.py) to ensure parity.
 
         Args:
             symbol: Symbol to compute features for

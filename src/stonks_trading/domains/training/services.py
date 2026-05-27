@@ -22,9 +22,12 @@ from typing import Any
 import neat
 import pandas as pd
 
-from stonks_trading.domains.trading.neat.config_builder import create_default_config
-from stonks_trading.domains.trading.neat.features import engineer_features
-from stonks_trading.domains.trading.neat.trainer import NeatTrainer, evaluate_genome_on_data
+from stonks_trading.domains.strategies.neat_swing.config_builder import create_default_config
+from stonks_trading.domains.strategies.neat_swing.features import engineer_features
+from stonks_trading.domains.strategies.neat_swing.trainer import (
+    NeatTrainer,
+    evaluate_genome_on_data,
+)
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 

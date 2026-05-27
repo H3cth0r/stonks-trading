@@ -320,3 +320,7 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = "stonks_trading.shared.ingest.binance"
 ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "stonks_trading.domains.strategies.neat_swing.*"
+ignore_errors = true

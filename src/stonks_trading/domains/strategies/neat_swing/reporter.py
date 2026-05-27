@@ -14,7 +14,6 @@ import neat
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from tqdm import tqdm
 
 from stonks_trading.domains.strategies.neat_swing.trading_env import TradingEnv
 
@@ -263,6 +262,8 @@ def test_genome(
     Returns:
         Final ROI percentage
     """
+    from tqdm import tqdm
+
     print(f"\n--- Testing {label} ---")
     net = neat.nn.RecurrentNetwork.create(genome, config)
     env = TradingEnv(
