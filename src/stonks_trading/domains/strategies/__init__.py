@@ -2,6 +2,10 @@
 
 This domain provides the foundation for supporting multiple trading strategies
 (NEAT, FIBRAS, etc.) with a common interface.
+
+Sub-packages:
+- base: Base interfaces, entities, registry, and repositories
+- neat_swing: NEAT swing trading strategy implementation
 """
 
 from stonks_trading.domains.strategies.base.entities import (
@@ -16,13 +20,16 @@ from stonks_trading.domains.strategies.base.interfaces import IStrategy, ITraina
 from stonks_trading.domains.strategies.base.registry import StrategyRegistry
 
 __all__ = [
+    # Base interfaces
     "IStrategy",
     "ITrainableStrategy",
+    # Base entities
     "Model",
     "Signal",
     "StrategyConfig",
     "TrainingData",
     "TrainingResult",
     "EvaluationResult",
+    # Registry
     "StrategyRegistry",
 ]
