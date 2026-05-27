@@ -5,6 +5,7 @@ All responses inherit from BaseResponse.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -12,15 +13,18 @@ from stonks_trading.shared.serializers import BaseResponse
 
 
 class RunBacktestRequest(BaseModel):
-    """Request to run a backtest."""
+    """Request to run a backtest (Phase 10D - generic via strategy_type)."""
 
-    genome_id: int = Field(..., gt=0)
+    strategy_type: str = Field(default="neat_swing", min_length=1, max_length=50)
+    model_id: int = Field(..., gt=0)
     symbol: str = Field(..., min_length=1, max_length=20)
     start_date: datetime
     end_date: datetime
     initial_capital: float = Field(default=10000.0, gt=0)
     fee_rate: float = Field(default=0.001, ge=0, le=0.01)
+    slippage_bps: int = Field(default=0, ge=0, le=100)
     mode: str = Field(default="backtest", pattern="^(backtest|dry_run_simulation)$")
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class BacktestResultResponse(BaseResponse):

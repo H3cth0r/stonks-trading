@@ -76,13 +76,17 @@ async def create_training_run_endpoint(
 ) -> GenomeComparisonResponse:
     """Start a new training run and return comparison result.
 
-    HTTP CONCERNS ONLY:
-    - Validate request (Pydantic)
-    - Call use case
-    - Return response or raise HTTPException
-
-    Business logic lives in TrainGenomeUseCase.
+    Phase 10D: Now accepts strategy_type for generic training interface.
+    Routes to strategy-specific training implementation.
+    Currently only NEAT is implemented, but FIBRAS and others will follow.
     """
+    # Validate strategy_type is supported (Phase 10D: only NEAT)
+    if request.strategy_type != "neat_swing":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Strategy {request.strategy_type} not yet supported for training",
+        )
+
     # Create services (in production, inject via dependency)
     training_executor = TrainingExecutor(
         generations=request.generations,
@@ -114,6 +118,7 @@ async def create_training_run_endpoint(
         generations=request.generations,
         population_size=request.population_size,
         improvement_threshold=0.5,
+        strategy_type=request.strategy_type,
     )
 
     try:

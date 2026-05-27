@@ -2,6 +2,8 @@
 
 API layer - NOT imported by the bot container.
 These routes provide HTTP access to backtesting domain functionality.
+
+Phase 10D: Refactored to use strategy_type + model_id instead of genome_id.
 """
 
 from fastapi import APIRouter, HTTPException, Path, Query, status
@@ -20,7 +22,7 @@ from stonks_trading.domains.backtesting.repositories import (
     list_backtest_results,
 )
 from stonks_trading.domains.backtesting.services import MetricsCalculator
-from stonks_trading.domains.trading.repositories import get_genome_by_id
+from stonks_trading.domains.strategies.neat_swing.repositories import get_neat_model_by_id
 
 # Create router
 router = APIRouter(prefix="/backtest", tags=["backtesting"])
@@ -41,12 +43,8 @@ async def run_backtest_endpoint(
 ) -> BacktestResultResponse:
     """Run a backtest simulation and return results.
 
-    HTTP CONCERNS ONLY:
-    - Validate request (Pydantic)
-    - Call use case
-    - Return response or raise HTTPException
-
-    Business logic lives in RunBacktestUseCase.
+    Phase 10D: Now accepts strategy_type + model_id instead of genome_id.
+    Routes to strategy-specific implementation via StrategyRegistry.
     """
     # Create services
     metrics_calculator = MetricsCalculator()
@@ -56,27 +54,36 @@ async def run_backtest_endpoint(
         metrics_calculator=metrics_calculator,
     )
 
-    # Fetch genome data first
-    genome = await get_genome_by_id(request.genome_id)
-    if not genome:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Genome {request.genome_id} not found",
-        )
-    if not genome.genome_data:
+    # Phase 10D: Use strategy-specific model lookup
+    # For NEAT, we fetch the model and get genome_data
+    if request.strategy_type == "neat_swing":
+        model = await get_neat_model_by_id(request.model_id)
+        if not model:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Model {request.model_id} not found",
+            )
+        if not model.model_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Model has no data",
+            )
+        genome_data = model.model_data
+    else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Genome has no data",
+            detail=f"Strategy {request.strategy_type} not supported for backtesting",
         )
 
     # Create request for use case
     backtest_request = backtesting_use_cases.RunBacktestRequest(
-        genome_id=request.genome_id,
+        genome_id=request.model_id,  # Keep genome_id for compatibility
         symbol=request.symbol.upper(),
         start_date=request.start_date,
         end_date=request.end_date,
-        genome_data=genome.genome_data,
+        genome_data=genome_data,
         initial_capital=request.initial_capital,
+        strategy_type=request.strategy_type,
     )
 
     try:

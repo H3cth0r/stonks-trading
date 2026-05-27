@@ -15,9 +15,12 @@ from stonks_trading.shared.serializers import BaseResponse
 class TrainingRunRequest(BaseModel):
     """Request to start a training run."""
 
+    strategy_type: str = Field(default="neat_swing", min_length=1, max_length=50)
     symbol: str = Field(..., min_length=1, max_length=20)
     generations: int = Field(default=30, ge=1, le=100)
     population_size: int = Field(default=150, ge=10, le=500)
+    episode_steps: int = Field(default=20160, ge=100, le=100000)
+    fee_rate: float = Field(default=0.001, ge=0, le=0.01)
     bot_type: str = Field(default="neat_swing", min_length=1, max_length=50)
     bot_instance_id: str = Field(default="default", min_length=1, max_length=100)
 

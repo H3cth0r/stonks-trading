@@ -74,7 +74,7 @@ class BacktestConfig:
 
 @dataclass
 class RunBacktestRequest:
-    """Request to run a backtest."""
+    """Request to run a backtest (Phase 10D - strategy-aware)."""
 
     genome_id: int
     symbol: str
@@ -83,6 +83,7 @@ class RunBacktestRequest:
     genome_data: bytes  # Pickled NEAT genome
     initial_capital: float = 10000.0
     config: BacktestConfig | None = None
+    strategy_type: str = "neat_swing"  # Phase 10D: Strategy type for routing
 
 
 @dataclass
