@@ -10,6 +10,7 @@ Usage:
         --instance-id my-bot-1
 """
 
+import argparse
 import asyncio
 import contextlib
 import logging
@@ -17,16 +18,16 @@ import signal
 import sys
 from typing import Any
 
-from stonks_trading.bots.base.context import BotContext
-from stonks_trading.bots.neat_swing.bot import NeatSwingBot
+from stonks_trading.bots import BotFactory, StrategyRegistry
+from stonks_trading.bots.neat_swing import create_neat_swing_strategy
 from stonks_trading.bots.neat_swing.state import NeatSwingState
-from stonks_trading.bots.neat_swing.strategy import NeatSwingStrategy
 from stonks_trading.bots.startup import run_startup_recovery
 from stonks_trading.domains.trading.adapters import DryRunAdapter
-from stonks_trading.domains.trading.enums import TradingMode
-from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.scheduler import Scheduler
 from stonks_trading.shared.websocket_client import WebSocketClient
+
+# Register NeatSwingStrategy factory (Phase 10C - strategy injection)
+StrategyRegistry.register("neat_swing", create_neat_swing_strategy)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,8 +45,6 @@ def parse_args(args: list[str] | None = None) -> dict[str, Any]:
     Returns:
         Parsed arguments dict
     """
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="NEAT Swing Trading Bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -89,6 +88,12 @@ def parse_args(args: list[str] | None = None) -> dict[str, Any]:
         default=False,
         help="Skip startup recovery (for testing)",
     )
+    parser.add_argument(
+        "--capital-allocation",
+        type=float,
+        default=None,
+        help="Initial capital allocation for this bot",
+    )
 
     parsed = parser.parse_args(args)
 
@@ -99,6 +104,7 @@ def parse_args(args: list[str] | None = None) -> dict[str, Any]:
         "config_path": parsed.config_path,
         "log_level": parsed.log_level,
         "skip_recovery": parsed.skip_recovery,
+        "capital_allocation": parsed.capital_allocation,
     }
 
 
@@ -107,15 +113,20 @@ async def run_bot(
     mode: str,
     instance_id: str,
     config_path: str,
+    capital_allocation: float | None,
     skip_recovery: bool = False,
 ) -> None:
-    """Initialize and run the trading bot.
+    """Initialize and run the trading bot using BotFactory.
+
+    Uses BotFactory.create() for proper strategy injection and dependency
+    management per Phase 10C.
 
     Args:
         symbols: List of trading symbols
         mode: Trading mode (dry_run or live)
         instance_id: Bot instance identifier
         config_path: Path to NEAT config
+        capital_allocation: Initial capital allocation for this bot
         skip_recovery: If True, skip startup recovery
     """
     # Run startup recovery before creating bot
@@ -129,37 +140,36 @@ async def run_bot(
             f"Bots recovered={recovery_report.bots_recovered}"
         )
 
-    # Create bot context
-    context = BotContext(bot_type="neat_swing", instance_id=instance_id)
-
-    # Create symbols
-    symbol_objects = [Symbol(value=s) for s in symbols]
-
-    # Create strategy
-    strategy = NeatSwingStrategy(config_path=config_path)
-
-    # Create initial state
+    # Use BotFactory for proper strategy injection (Phase 10C)
+    # Create initial state before passing to factory
     initial_state = NeatSwingState()
+    if capital_allocation:
+        initial_state.current_equity = capital_allocation
+        initial_state.peak_equity = capital_allocation
 
-    # Create bot
-    bot = NeatSwingBot(
-        context=context,
-        symbols=symbol_objects,
-        mode=TradingMode(mode),
-        strategy=strategy,
+    bot = BotFactory.create(
+        bot_type="neat_swing",
+        instance_id=instance_id,
+        symbols=symbols,
+        mode=mode,
+        strategy_type="neat_swing",
+        capital_allocation=capital_allocation,
         initial_state=initial_state,
-        config_path=config_path,
+        strategy_config={"config_path": config_path},
     )
 
     # Set up adapter based on mode
     if mode == "dry_run":
+        # Use capital_allocation or default to 10000
+        initial_balance = {
+            "USDT": capital_allocation if capital_allocation else 10000.0,
+            "BTC": 0.0,
+        }
         adapter = DryRunAdapter(
-            initial_balance={"USDT": 10000.0, "BTC": 0.0},
+            initial_balance=initial_balance,
             slippage_bps=5.0,
             fee_rate=0.001,
         )
-        # Set price source for dry run (would need real adapter in production)
-        # adapter.set_price_source(real_adapter)
     else:
         # For live mode, would need BinanceAdapter with API credentials
         raise NotImplementedError("Live mode requires BinanceAdapter setup")
@@ -172,7 +182,7 @@ async def run_bot(
         symbols=ws_symbols,
         callback=bot.handle_candle,
     )
-    bot.set_websocket(websocket)
+    bot.set_websocket(websocket)  # type: ignore[attr-defined]
 
     # Set up scheduler
     scheduler = Scheduler()
@@ -187,7 +197,7 @@ async def run_bot(
     heartbeat_task = asyncio.create_task(heartbeat_loop(bot))
 
     try:
-        logger.info(f"Starting bot {context} with symbols {symbols} in {mode} mode")
+        logger.info(f"Starting bot neat_swing/{instance_id} with symbols {symbols} in {mode} mode")
         await bot.start()
     except Exception as e:
         logger.error(f"Bot error: {e}")
@@ -199,7 +209,7 @@ async def run_bot(
             await heartbeat_task
 
 
-async def heartbeat_loop(bot: NeatSwingBot) -> None:
+async def heartbeat_loop(bot: Any) -> None:
     """Background task that sends periodic heartbeats.
 
     Runs every 60 seconds while bot is running.
@@ -212,7 +222,7 @@ async def heartbeat_loop(bot: NeatSwingBot) -> None:
         await asyncio.sleep(60)
 
 
-async def shutdown(bot: NeatSwingBot, scheduler: Scheduler) -> None:
+async def shutdown(bot: Any, scheduler: Scheduler) -> None:
     """Graceful shutdown handler.
 
     Args:
@@ -238,6 +248,7 @@ def main() -> None:
                 mode=args["mode"],
                 instance_id=args["instance_id"],
                 config_path=args["config_path"],
+                capital_allocation=args["capital_allocation"],
                 skip_recovery=args["skip_recovery"],
             )
         )

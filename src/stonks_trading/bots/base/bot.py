@@ -55,6 +55,7 @@ class BaseBot(ABC, Generic[StateT, StrategyT]):
         mode: TradingMode,
         strategy: StrategyT,
         initial_state: StateT,
+        capital_allocation: float | None = None,
     ):
         """Initialize bot with context and dependencies.
 
@@ -64,12 +65,14 @@ class BaseBot(ABC, Generic[StateT, StrategyT]):
             mode: Trading mode (dry_run or live).
             strategy: Strategy instance for signal generation.
             initial_state: Initial state (used if no persisted state).
+            capital_allocation: Initial capital allocation for this bot.
         """
         self.context = context
         self.symbols = symbols
         self.mode = mode
         self.strategy = strategy
         self.state = initial_state
+        self.capital_allocation = capital_allocation
 
         # Injected at runtime (set by start() or factory)
         self.adapter: Any | None = None
