@@ -172,3 +172,15 @@ class BaseBot(ABC, Generic[StateT, StrategyT]):
         RecordHeartbeatUseCase with state hash and last candle timestamp.
         """
         ...
+
+    def emit_live_update(self, snapshot: Any) -> None:
+        """Emit live state update to WebSocket subscribers.
+
+        Override in subclass to publish state changes via LiveDataManager.
+        This is called after trades and significant state changes.
+
+        Args:
+            snapshot: BotStateSnapshot to emit
+        """
+        # Default no-op: subclasses with live visualization override this
+        pass

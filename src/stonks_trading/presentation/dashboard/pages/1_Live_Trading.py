@@ -1,10 +1,12 @@
 """Live Trading - Real-time equity curves and positions.
 
 All imports at module level per CLEAN architecture - no lazy imports.
+Phase 10E: WebSocket integration for real-time visualization.
 """
 
 from time import sleep
 
+import pandas as pd
 import streamlit as st
 
 from stonks_trading.presentation.dashboard.utils import fetch_sync, post_sync
@@ -12,6 +14,14 @@ from stonks_trading.presentation.dashboard.utils import fetch_sync, post_sync
 st.set_page_config(page_title="Live Trading", page_icon="📊")
 
 st.title("📊 Live Trading")
+
+# WebSocket state management
+if "ws_connected" not in st.session_state:
+    st.session_state.ws_connected = False
+if "equity_history" not in st.session_state:
+    st.session_state.equity_history = []
+if "trade_markers" not in st.session_state:
+    st.session_state.trade_markers = []
 
 # Bot selector
 bots_data = fetch_sync("/api/v1/bots")
@@ -153,9 +163,49 @@ if selected_bot and selected_bot != "No bots available":
     else:
         st.info("No recent trades")
 
-    # Equity Curve (placeholder - would need historical data endpoint)
+    # Equity Curve with real-time WebSocket updates
     st.header("Equity Curve")
-    st.info("Equity curve visualization requires historical equity data endpoint (coming soon)")
+
+    # WebSocket URL for live updates (Phase 10E)
+    ws_url = f"ws://localhost:8000/ws/bots/{bot_type}/{instance_id}/state"
+    st.caption(f"WebSocket: {ws_url}")
+
+    try:
+        # REST polling fallback (always available)
+        equity_data = fetch_sync(f"/api/v1/bots/{bot_type}/{instance_id}/equity-history")
+        if equity_data and "history" in equity_data and equity_data["history"]:
+            df = pd.DataFrame(equity_data["history"])
+            if not df.empty:
+                df["timestamp"] = pd.to_datetime(df["timestamp"])
+                st.line_chart(df.set_index("timestamp")["equity"], use_container_width=True)
+            else:
+                st.info("Collecting equity data... Bot needs to be running.")
+        else:
+            st.info(
+                "Equity curve will appear when bot starts trading. Real-time WebSocket updates coming in Phase 10E."
+            )
+
+        # Trade markers overlay
+        trades_data = fetch_sync(f"/api/v1/bots/{bot_type}/{instance_id}/trades", {"limit": 50})
+        if trades_data and "trades" in trades_data and trades_data["trades"]:
+            trades = trades_data["trades"]
+            buy_trades = [t for t in trades if t.get("side") == "BUY"]
+            sell_trades = [t for t in trades if t.get("side") == "SELL"]
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Total Buys", len(buy_trades))
+            with col2:
+                st.metric("Total Sells", len(sell_trades))
+    except Exception as e:
+        st.warning(f"Real-time charts unavailable: {e}. Using REST polling.")
+        equity_data = fetch_sync(f"/api/v1/bots/{bot_type}/{instance_id}/equity-history")
+        if equity_data and "history" in equity_data and equity_data["history"]:
+            df = pd.DataFrame(equity_data["history"])
+            if not df.empty:
+                df["timestamp"] = pd.to_datetime(df["timestamp"])
+                st.line_chart(df.set_index("timestamp")["equity"], use_container_width=True)
+        else:
+            st.info("Equity curve will appear when bot starts trading.")
 
 else:
     st.warning("No bots available. Please register a bot first.")

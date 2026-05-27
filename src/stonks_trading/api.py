@@ -22,6 +22,7 @@ from stonks_trading.shared.config import settings
 from stonks_trading.shared.database import TORTOISE_ORM
 from stonks_trading.shared.logger import logger
 from stonks_trading.shared.metrics import MetricsExporter
+from stonks_trading.shared.websocket_api import get_websocket_router
 
 
 async def init_database() -> None:
@@ -129,7 +130,8 @@ def create_app() -> FastAPI:
         prefix="/api/v1",
         tags=["bot-control"],
     )
-    # Future: app.include_router(get_portfolio_router(), prefix="/api/v1", tags=["portfolio"])
+    # WebSocket router (Phase 10E)
+    app.include_router(get_websocket_router(), tags=["websocket"])
 
     # Register Tortoise ORM
     # generate_schemas=False because we handle initialization in lifespan
