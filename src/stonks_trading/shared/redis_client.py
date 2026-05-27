@@ -162,8 +162,9 @@ async def get_equity_history(
     """
     client = await get_redis()
     key = RedisKeys.equity_history(bot_type, instance_id)
-    values = await client.lrange(key, 0, limit - 1)
-    return [float(v) for v in values]
+    values_raw = await client.lrange(key, 0, limit - 1)  # type: ignore[misc]
+    values_str = values_raw if isinstance(values_raw, list) else []
+    return [float(v) for v in values_str]
 
 
 async def push_equity(bot_type: str, instance_id: str, equity: float) -> int:
@@ -181,11 +182,11 @@ async def push_equity(bot_type: str, instance_id: str, equity: float) -> int:
     key = RedisKeys.equity_history(bot_type, instance_id)
 
     # Push and trim to max points
-    await client.lpush(key, str(equity))
-    await client.ltrim(key, 0, settings.equity_history_max_points - 1)
+    await client.lpush(key, str(equity))  # type: ignore[misc]
+    await client.ltrim(key, 0, settings.equity_history_max_points - 1)  # type: ignore[misc]
 
-    result = await client.llen(key)
-    return int(result)
+    result_raw = await client.llen(key)  # type: ignore[misc]
+    return int(result_raw)
 
 
 # Cache key patterns for Phase 10H performance optimization
