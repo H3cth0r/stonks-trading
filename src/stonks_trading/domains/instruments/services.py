@@ -35,6 +35,7 @@ __all__ = [
     "get_job_status",
     "get_candle_date_range",
     "update_instrument_data",
+    "discover_and_register_instruments",
 ]
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.config import settings
@@ -60,10 +61,10 @@ async def get_candle_date_range(
         duckdb = DuckDBClient(db_path=duckdb_path)
         duckdb.connect()
         try:
-            result = duckdb.conn.execute(
+            result = duckdb._conn.execute(
                 """
                 SELECT MIN(timestamp) as min_date, MAX(timestamp) as max_date
-                FROM candles
+                FROM ohlcv_1m
                 WHERE symbol = ?
                 """,
                 [symbol],
@@ -504,3 +505,116 @@ async def check_backfill_completion(symbol: str) -> bool:
         return True  # Still "complete" (failed)
 
     return False
+
+
+async def discover_and_register_instruments(
+    duckdb_path: str = "data/neat.db",
+) -> list[dict[str, Any]]:
+    """Discover existing instruments in DuckDB and auto-register them.
+
+    On startup, scans the database for symbols with data and ensures they
+    are registered in the instrument registry. If data exists but the
+    instrument is not registered, auto-creates the registration.
+
+    Args:
+        duckdb_path: Path to DuckDB database
+
+    Returns:
+        List of discovered/registered instruments with their status
+    """
+    from pathlib import Path
+
+    # Check if database exists
+    if not Path(duckdb_path).exists():
+        logger.info("No existing DuckDB database found, skipping discovery")
+        return []
+
+    def _discover_symbols():
+        """Query DuckDB for unique symbols."""
+        duckdb = DuckDBClient(db_path=duckdb_path)
+        duckdb.connect()
+        try:
+            result = duckdb._conn.execute(
+                """
+                SELECT DISTINCT symbol FROM ohlcv_1m
+                """
+            ).fetchall()
+            return [row[0] for row in result if row[0]]
+        except Exception as e:
+            logger.warning("Could not query DuckDB for symbols", error=str(e))
+            return []
+        finally:
+            duckdb.close()
+
+    # Get symbols from database
+    symbols = await asyncio.to_thread(_discover_symbols)
+
+    if not symbols:
+        logger.info("No existing instrument data found in DuckDB")
+        return []
+
+    discovered = []
+    for symbol in symbols:
+        # Check if already registered
+        existing = await get_instrument(symbol)
+        if existing:
+            # Check if data is up to date
+            min_date, max_date = await get_candle_date_range(symbol, duckdb_path)
+            time_since_update = datetime.utcnow() - max_date if max_date else timedelta(days=999)
+
+            if time_since_update > timedelta(hours=1):
+                # Data is stale, trigger update
+                logger.info(
+                    "Instrument data is stale, updating",
+                    symbol=symbol,
+                    last_update=max_date.isoformat() if max_date else None,
+                    hours_behind=time_since_update.total_seconds() / 3600,
+                )
+                asyncio.create_task(update_instrument_data(symbol, duckdb_path))
+                discovered.append(
+                    {
+                        "symbol": symbol,
+                        "action": "updating",
+                        "existing": True,
+                        "last_update": max_date.isoformat() if max_date else None,
+                    }
+                )
+            else:
+                discovered.append(
+                    {
+                        "symbol": symbol,
+                        "action": "already_registered",
+                        "existing": True,
+                        "last_update": max_date.isoformat() if max_date else None,
+                    }
+                )
+        else:
+            # Auto-register with backfill disabled (data already exists)
+            logger.info("Auto-registering discovered instrument", symbol=symbol)
+            await register_instrument(
+                symbol=symbol,
+                name=symbol,
+                auto_backfill=False,  # Don't backfill, data exists
+                backfill_days=730,
+            )
+            # Mark as ready since data exists
+            await update_instrument_status(
+                symbol,
+                status="ready",
+                last_backfill_at=datetime.utcnow(),
+            )
+            discovered.append(
+                {
+                    "symbol": symbol,
+                    "action": "auto_registered",
+                    "existing": False,
+                }
+            )
+
+    logger.info(
+        "Instrument discovery complete",
+        found=len(symbols),
+        registered=len([d for d in discovered if d["action"] == "auto_registered"]),
+    )
+
+    return discovered

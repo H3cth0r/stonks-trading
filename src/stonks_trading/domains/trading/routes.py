@@ -470,36 +470,89 @@ async def get_candles(
     symbol_obj = Symbol(value=symbol.upper())
     candles: list[MarketDataResponse] = []
 
-    # Try DuckDB first
-    duckdb = DuckDBClient()
-    duckdb.connect()
-    try:
-        if start or end:
+    # Strategy: Query DuckDB for historical + Binance for recent data
+    candles: list[MarketDataResponse] = []
+    now = datetime.utcnow()
+
+    # Determine what we need from each source
+    # DuckDB: Historical data up to last hour
+    # Binance: Recent data (last hour to now) for live trading
+    duckdb_end = end if end and end < now - timedelta(hours=1) else now - timedelta(hours=1)
+    effective_start = start or datetime(1970, 1, 1)
+    needs_binance = not end or end > now - timedelta(hours=1)
+    binance_start = max(effective_start, now - timedelta(hours=2)) if needs_binance else None
+
+    # Query DuckDB for historical data
+    if not end or effective_start < now - timedelta(hours=1):
+        duckdb = DuckDBClient()
+        duckdb.connect()
+        try:
             duckdb_data = duckdb.get_data_range(
                 symbol_obj,
-                start or datetime(1970, 1, 1),
-                end or datetime.utcnow(),
+                effective_start,
+                duckdb_end,
             )
-        else:
-            duckdb_data = duckdb.get_recent_data(symbol_obj, lookback=timedelta(days=30))
-    finally:
-        duckdb.close()
+            if duckdb_data:
+                # For large datasets, sample evenly to get representative data across time range
+                if len(duckdb_data) > limit:
+                    # Sample evenly across the time range
+                    step = len(duckdb_data) // limit
+                    sampled_data = duckdb_data[::step][:limit]
+                else:
+                    sampled_data = duckdb_data
 
-    if duckdb_data:
-        candles = [
-            MarketDataResponse(
-                symbol=symbol.upper(),
-                timestamp=row["timestamp"],
-                open=row["open"],
-                high=row["high"],
-                low=row["low"],
-                close=row["close"],
-                volume=row["volume"],
+                candles = [
+                    MarketDataResponse(
+                        symbol=symbol.upper(),
+                        timestamp=row["timestamp"],
+                        open=row["open"],
+                        high=row["high"],
+                        low=row["low"],
+                        close=row["close"],
+                        volume=row["volume"],
+                    )
+                    for row in sampled_data
+                ]
+        finally:
+            duckdb.close()
+
+    # Query Binance for recent/live data if needed
+    if binance_start and len(candles) < limit:
+        remaining = limit - len(candles)
+        adapter = ExchangeAdapterFactory.create_adapter()
+        try:
+            use_case = GetCandlesUseCase(adapter)
+            exchange_candles = await use_case.execute(
+                symbol=symbol_obj,
+                start=binance_start,
+                end=end or now,
+                limit=remaining,
             )
-            for row in duckdb_data[-limit:]
-        ]
-    else:
-        # Fall back to exchange adapter
+            if exchange_candles:
+                # Append Binance candles
+                binance_candle_list = [
+                    MarketDataResponse(
+                        symbol=symbol.upper(),
+                        timestamp=datetime.fromtimestamp(c["timestamp"] / 1000),
+                        open=c["open"],
+                        high=c["high"],
+                        low=c["low"],
+                        close=c["close"],
+                        volume=c["volume"],
+                    )
+                    for c in exchange_candles
+                ]
+                # Merge and deduplicate by timestamp
+                candles_by_ts = {c.timestamp: c for c in candles}
+                for c in binance_candle_list:
+                    candles_by_ts[c.timestamp] = c
+                candles = sorted(candles_by_ts.values(), key=lambda x: x.timestamp)[-limit:]
+        finally:
+            await adapter.close()
+
+    # If no data from either source, return empty
+    if not candles:
+        # Try Binance as fallback for entire range
         adapter = ExchangeAdapterFactory.create_adapter()
         try:
             use_case = GetCandlesUseCase(adapter)

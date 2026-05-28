@@ -163,23 +163,67 @@ with tab_market:
 
     start_dt, _ = get_period_filter(period)
 
+    # Build query params - add limit for MAX period to show more data
+    params = {"start": start_dt.isoformat()} if start_dt else {}
+    if period == "MAX":
+        params["limit"] = 50000  # Max allowed by API
+    elif period in ["1Y", "YTD"]:
+        params["limit"] = 10000
+
     candles_data = fetch_sync(
         f"/api/v1/market/candles/{ticker}",
-        {"start": start_dt.isoformat()} if start_dt else None,
+        params if params else None,
     )
 
     if candles_data and candles_data.get("candles"):
         df = pd.DataFrame(candles_data["candles"])
-        chart_df = df[["timestamp", "close"]].copy()
-        chart_df["timestamp"] = pd.to_datetime(chart_df["timestamp"])
-        chart_df["close"] = pd.to_numeric(chart_df["close"], errors="coerce")
-        chart_df = chart_df.dropna(subset=["close"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["close"] = pd.to_numeric(df["close"], errors="coerce")
+        df = df.dropna(subset=["close"])
+
+        # Aggregate based on period for better performance
+        if period in ["1Y", "MAX"]:
+            # Aggregate to daily for large time spans
+            df_daily = (
+                df.set_index("timestamp")
+                .resample("D")
+                .agg(
+                    {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+                )
+                .dropna()
+            )
+            df_daily = df_daily.reset_index()
+            chart_df = df_daily[["timestamp", "close"]].copy()
+            agg_label = "Daily"
+        elif period in ["1M", "YTD"]:
+            # Aggregate to hourly for medium time spans
+            df_hourly = (
+                df.set_index("timestamp")
+                .resample("1H")
+                .agg(
+                    {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+                )
+                .dropna()
+            )
+            df_hourly = df_hourly.reset_index()
+            chart_df = df_hourly[["timestamp", "close"]].copy()
+            agg_label = "Hourly"
+        else:
+            # Keep original for short time spans (1H, 1D, 1W)
+            chart_df = df[["timestamp", "close"]].copy()
+            agg_label = "1-Minute"
+
         chart_df = chart_df.reset_index(drop=True)
 
-        fig = px.line(chart_df, x="timestamp", y="close", title=f"{ticker} Price")
+        fig = px.line(chart_df, x="timestamp", y="close", title=f"{ticker} Price ({agg_label})")
         fig.update_layout(yaxis_title="Price (USD)", xaxis_title="Time")
         fig.update_layout(hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
+
+        # Show data point count
+        st.caption(
+            f"Showing {len(chart_df):,} {agg_label.lower()} data points from {len(df):,} 1-minute candles"
+        )
     else:
         st.info("No data available. Click 'Start Backfill' to download data.")
 
@@ -187,10 +231,21 @@ with tab_market:
     st.markdown("### OHLCV Data")
 
     if candles_data and candles_data.get("candles"):
-        df = pd.DataFrame(candles_data["candles"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
+        # Use aggregated dataframe from above if it exists
+        if period in ["1Y", "MAX"]:
+            # Already have df_daily from above
+            display_df = df_daily.copy()
+            display_df["timestamp"] = display_df["timestamp"].dt.strftime("%Y-%m-%d")
+        elif period in ["1M", "YTD"]:
+            # Already have df_hourly from above
+            display_df = df_hourly.copy()
+            display_df["timestamp"] = display_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M")
+        else:
+            display_df = df.copy()
+            display_df["timestamp"] = display_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M")
+
         st.dataframe(
-            df[["timestamp", "open", "high", "low", "close", "volume"]],
+            display_df[["timestamp", "open", "high", "low", "close", "volume"]],
             use_container_width=True,
             hide_index=True,
         )

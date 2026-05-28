@@ -90,9 +90,27 @@ async def lifespan(app: FastAPI):
     """Application lifespan context manager.
 
     Handles startup database initialization and shutdown cleanup.
+    Also discovers existing instruments from DuckDB and auto-registers them.
     """
     logger.info("Starting up API server...")
     await init_database()
+
+    # Discover and auto-register existing instruments from DuckDB
+    try:
+        from stonks_trading.domains.instruments.services import (
+            discover_and_register_instruments,
+        )
+
+        discovered = await discover_and_register_instruments()
+        if discovered:
+            logger.info(
+                "Auto-discovered instruments",
+                count=len(discovered),
+                instruments=[d["symbol"] for d in discovered],
+            )
+    except Exception as e:
+        logger.warning("Failed to discover instruments", error=str(e))
+
     yield
     logger.info("Shutting down API server...")
 
