@@ -231,3 +231,26 @@ async def trigger_backfill_endpoint(
         "job_id": instrument.backfill_job_id,
         "status": instrument.status,
     }
+
+
+@router.post("/{symbol}/update")
+async def update_instrument_data_endpoint(
+    symbol: str = Path(..., min_length=1),
+) -> dict:
+    """Fetch latest data for an instrument (incremental update).
+
+    Downloads only missing data from last known candle to now.
+    If backfill was interrupted, this will resume from where it left off.
+    """
+    from stonks_trading.domains.instruments.services import update_instrument_data
+
+    result = await update_instrument_data(symbol.upper())
+
+    return {
+        "message": f"Update complete for {symbol}",
+        "job_id": result.get("job_id"),
+        "status": result.get("status"),
+        "candles_downloaded": result.get("candles_downloaded"),
+        "start_date": result.get("start_date"),
+        "end_date": result.get("end_date"),
+    }

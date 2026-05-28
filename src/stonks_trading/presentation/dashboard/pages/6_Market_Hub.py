@@ -68,7 +68,7 @@ with tab_market:
         instruments = instruments_data["instruments"]
         symbol_options = [i["symbol"] for i in instruments]
     else:
-        symbol_options = ["BTC_USD", "ETH_USD"]
+        symbol_options = []
 
     symbol_options = symbol_options + ["+ Register New Symbol"]
 
@@ -87,13 +87,15 @@ with tab_market:
     col1, col2 = st.columns([3, 1])
 
     with col1:
-        # Default to first instrument or BTC_USD
+        # Default to first registered instrument if available
         default_idx = 0
-        if len(symbol_options) > 1 and "BTC_USD" in symbol_options:
-            default_idx = symbol_options.index("BTC_USD")
+        if symbol_options and symbol_options[0] != "+ Register New Symbol":
+            default_idx = 0
+        else:
+            default_idx = 0  # Will be "+ Register New Symbol" if no instruments
         selected_symbol = st.selectbox(
             "Select Instrument",
-            options=symbol_options,
+            options=symbol_options if symbol_options else ["+ Register New Symbol"],
             index=default_idx,
             help="Choose a registered instrument or register a new one",
         )
@@ -149,13 +151,10 @@ with tab_market:
             # Clear after showing once
             del st.session_state.new_instrument_registered
 
-        # Fallback selection
+        # No valid symbol selected - show registration prompt
         if not selected_symbol or selected_symbol == "+ Register New Symbol":
-            selected_symbol = (
-                symbol_options[0]
-                if symbol_options and symbol_options[0] != "+ Register New Symbol"
-                else "BTC_USD"
-            )
+            st.info("👆 Please register a new instrument above to get started")
+            st.stop()
 
     ticker = selected_symbol
 

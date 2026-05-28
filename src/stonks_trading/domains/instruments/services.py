@@ -33,6 +33,8 @@ __all__ = [
     "backfill_from_massive",
     "set_job_status",
     "get_job_status",
+    "get_candle_date_range",
+    "update_instrument_data",
 ]
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.config import settings
@@ -41,19 +43,58 @@ from stonks_trading.shared.logger import logger
 from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 
 
+async def get_candle_date_range(
+    symbol: str, duckdb_path: str = "data/neat.db"
+) -> tuple[datetime | None, datetime | None]:
+    """Get the date range of existing candles for a symbol.
+
+    Args:
+        symbol: Trading symbol
+        duckdb_path: Path to DuckDB database
+
+    Returns:
+        Tuple of (min_date, max_date) or (None, None) if no data
+    """
+
+    def _query_range():
+        duckdb = DuckDBClient(db_path=duckdb_path)
+        duckdb.connect()
+        try:
+            result = duckdb.conn.execute(
+                """
+                SELECT MIN(timestamp) as min_date, MAX(timestamp) as max_date
+                FROM candles
+                WHERE symbol = ?
+                """,
+                [symbol],
+            ).fetchone()
+            return result
+        finally:
+            duckdb.close()
+
+    row = await asyncio.to_thread(_query_range)
+    if row and row[0] and row[1]:
+        return row[0], row[1]
+    return None, None
+
+
 async def backfill_from_massive(
     symbol: str,
     days: int = 730,
     duckdb_path: str = "data/neat.db",
     job_id: str | None = None,
+    incremental: bool = False,
 ) -> dict[str, Any]:
     """Backfill historical data from Massive API.
+
+    Supports resumable backfill - will only download missing date ranges.
 
     Args:
         symbol: Symbol to backfill (e.g., 'BTC_USD')
         days: Number of days to backfill (default 730 = 2 years)
         duckdb_path: Path to DuckDB database
         job_id: Optional job ID for status tracking (generates if not provided)
+        incremental: If True, only fetch data from last known candle to now
 
     Returns:
         dict with job_id, status, candles_downloaded, duration_seconds
@@ -62,12 +103,75 @@ async def backfill_from_massive(
 
     job_id = job_id or str(uuid.uuid4())
 
-    logger.info("Starting Massive backfill", job_id=job_id, symbol=symbol, days=days)
+    # Check existing data range
+    existing_min, existing_max = await get_candle_date_range(symbol, duckdb_path)
+
+    end = datetime.utcnow()
+
+    if incremental and existing_max:
+        # Incremental mode: only fetch from last known date to now
+        start = existing_max
+        logger.info(
+            "Starting incremental backfill",
+            job_id=job_id,
+            symbol=symbol,
+            from_date=start.isoformat(),
+            to_date=end.isoformat(),
+        )
+    elif existing_min and existing_max:
+        # Check if we need to extend the range
+        target_start = end - timedelta(days=days)
+        if existing_min <= target_start and existing_max >= end - timedelta(hours=1):
+            # Already have complete data
+            logger.info(
+                "Backfill already complete",
+                symbol=symbol,
+                existing_min=existing_min.isoformat(),
+                existing_max=existing_max.isoformat(),
+            )
+            return {
+                "job_id": job_id,
+                "status": "completed",
+                "symbol": symbol,
+                "candles_downloaded": 0,
+                "message": "Data already up to date",
+                "start_date": existing_min.isoformat(),
+                "end_date": existing_max.isoformat(),
+            }
+        # Determine what range we need
+        if existing_max < end - timedelta(hours=1):
+            # Need to fetch newer data
+            start = existing_max
+            logger.info(
+                "Resuming backfill from existing data",
+                job_id=job_id,
+                symbol=symbol,
+                existing_max=existing_max.isoformat(),
+                target_end=end.isoformat(),
+            )
+        else:
+            start = end - timedelta(days=days)
+    else:
+        # Fresh backfill
+        start = end - timedelta(days=days)
+        logger.info(
+            "Starting fresh Massive backfill",
+            job_id=job_id,
+            symbol=symbol,
+            days=days,
+        )
 
     # Update status to running
     await set_job_status(
         job_id,
-        {"status": "running", "symbol": symbol, "progress": 0, "candles_downloaded": 0},
+        {
+            "status": "running",
+            "symbol": symbol,
+            "progress": 0,
+            "candles_downloaded": 0,
+            "existing_min": existing_min.isoformat() if existing_min else None,
+            "existing_max": existing_max.isoformat() if existing_max else None,
+        },
     )
 
     def _do_backfill() -> dict[str, Any]:
@@ -80,9 +184,6 @@ async def backfill_from_massive(
         adapter = MassiveAdapter(api_key=settings.massive_api_key)
 
         try:
-            end = datetime.utcnow()
-            start = end - timedelta(days=days)
-
             # Fetch candles (blocking I/O)
             symbol_obj = Symbol(value=symbol)
             import asyncio as inner_asyncio
@@ -131,6 +232,52 @@ async def backfill_from_massive(
         }
         await set_job_status(job_id, error_result)
         raise
+
+
+async def update_instrument_data(symbol: str, duckdb_path: str = "data/neat.db") -> dict[str, Any]:
+    """Fetch latest data for an instrument (incremental update).
+
+    Args:
+        symbol: Trading symbol to update
+        duckdb_path: Path to DuckDB database
+
+    Returns:
+        dict with update status and candles downloaded
+    """
+    job_id = str(uuid.uuid4())
+
+    # Check existing data
+    existing_min, existing_max = await get_candle_date_range(symbol, duckdb_path)
+
+    if not existing_max:
+        logger.warning("No existing data found, running full backfill", symbol=symbol)
+        return await backfill_from_massive(symbol, days=730, job_id=job_id)
+
+    # Check if data is recent (within last hour)
+    time_since_update = datetime.utcnow() - existing_max
+    if time_since_update < timedelta(hours=1):
+        logger.info(
+            "Data is already up to date", symbol=symbol, last_update=existing_max.isoformat()
+        )
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "symbol": symbol,
+            "candles_downloaded": 0,
+            "message": "Data already up to date",
+            "last_update": existing_max.isoformat(),
+            "time_since_update_minutes": time_since_update.total_seconds() / 60,
+        }
+
+    # Run incremental backfill
+    logger.info(
+        "Updating instrument data",
+        symbol=symbol,
+        last_update=existing_max.isoformat(),
+        time_behind_hours=time_since_update.total_seconds() / 3600,
+    )
+
+    return await backfill_from_massive(symbol, days=730, job_id=job_id, incremental=True)
 
 
 async def set_job_status(job_id: str, status: dict[str, Any], ttl: int = 3600) -> None:

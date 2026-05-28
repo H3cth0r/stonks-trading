@@ -20,6 +20,7 @@ from stonks_trading.domains.instruments.services import (
     list_instruments,
     register_instrument,
     set_job_status,
+    update_instrument_data,
 )
 
 __all__ = [
