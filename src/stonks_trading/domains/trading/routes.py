@@ -5,7 +5,7 @@ These routes provide HTTP access to domain functionality.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -82,6 +82,7 @@ from stonks_trading.domains.trading.use_cases import (
     PlaceOrderUseCase,
 )
 from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 
 # Phase 10B - Backfill router
 backfill_router = APIRouter(prefix="/backfill", tags=["backfill"])
@@ -459,39 +460,74 @@ async def get_candles(
     symbol: str,
     start: datetime | None = None,
     end: datetime | None = None,
+    limit: int = Query(default=1000, ge=1, le=50000),
 ) -> MarketDataListResponse:
-    """Get OHLCV candles for symbol from exchange."""
-    adapter = ExchangeAdapterFactory.create_adapter()
+    """Get OHLCV candles for symbol from DuckDB (historical data).
 
+    First checks DuckDB for historical data, falls back to exchange
+    adapter for recent/live data if DuckDB is empty.
+    """
+    symbol_obj = Symbol(value=symbol.upper())
+    candles: list[MarketDataResponse] = []
+
+    # Try DuckDB first
+    duckdb = DuckDBClient()
+    duckdb.connect()
     try:
-        use_case = GetCandlesUseCase(adapter)
-        candles = await use_case.execute(
-            symbol=Symbol(value=symbol.upper()),
-            start=start,
-            end=end,
-            limit=100,
-        )
+        if start or end:
+            duckdb_data = duckdb.get_data_range(
+                symbol_obj,
+                start or datetime(1970, 1, 1),
+                end or datetime.utcnow(),
+            )
+        else:
+            duckdb_data = duckdb.get_recent_data(symbol_obj, lookback=timedelta(days=30))
+    finally:
+        duckdb.close()
 
-        # Convert to response format
-        candle_responses = [
+    if duckdb_data:
+        candles = [
             MarketDataResponse(
                 symbol=symbol.upper(),
-                timestamp=datetime.fromtimestamp(c["timestamp"] / 1000),
-                open=c["open"],
-                high=c["high"],
-                low=c["low"],
-                close=c["close"],
-                volume=c["volume"],
+                timestamp=row["timestamp"],
+                open=row["open"],
+                high=row["high"],
+                low=row["low"],
+                close=row["close"],
+                volume=row["volume"],
             )
-            for c in candles
+            for row in duckdb_data[-limit:]
         ]
+    else:
+        # Fall back to exchange adapter
+        adapter = ExchangeAdapterFactory.create_adapter()
+        try:
+            use_case = GetCandlesUseCase(adapter)
+            exchange_candles = await use_case.execute(
+                symbol=symbol_obj,
+                start=start,
+                end=end,
+                limit=limit,
+            )
+            candles = [
+                MarketDataResponse(
+                    symbol=symbol.upper(),
+                    timestamp=datetime.fromtimestamp(c["timestamp"] / 1000),
+                    open=c["open"],
+                    high=c["high"],
+                    low=c["low"],
+                    close=c["close"],
+                    volume=c["volume"],
+                )
+                for c in exchange_candles
+            ]
+        finally:
+            await adapter.close()
 
-        return MarketDataListResponse(
-            symbol=symbol.upper(),
-            candles=candle_responses,
-        )
-    finally:
-        await adapter.close()
+    return MarketDataListResponse(
+        symbol=symbol.upper(),
+        candles=candles,
+    )
 
 
 @market_router.get(
