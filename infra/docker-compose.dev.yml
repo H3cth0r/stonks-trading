@@ -129,6 +129,7 @@ services:
       - MASSIVE_API_KEY=${MASSIVE_API_KEY:-}
     volumes:
       - ../src:/app/src:ro  # Mount source for development
+      - ../data:/app/data  # Persist DuckDB data
     depends_on:
       postgres:
         condition: service_healthy
