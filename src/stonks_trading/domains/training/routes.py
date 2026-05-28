@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from stonks_trading.domains.trading.value_objects import BotContext, Symbol
 from stonks_trading.domains.training import use_cases as training_use_cases
+from stonks_trading.domains.training.async_executor import get_training_executor
 from stonks_trading.domains.training.dtos import (
     CheckpointCleanupResponse,
     GenerationMetricListResponse,
@@ -21,6 +22,12 @@ from stonks_trading.domains.training.dtos import (
     SchedulerJobListResponse,
     SchedulerJobRequest,
     SchedulerJobResponse,
+    SelectCheckpointRequest,
+    SelectCheckpointResponse,
+    TrainingJobDetailResponse,
+    TrainingJobListResponse,
+    TrainingJobRequest,
+    TrainingJobResponse,
     TrainingProgressResponse,
     TrainingRunListResponse,
     TrainingRunRequest,
@@ -470,3 +477,160 @@ async def stop_scheduler_endpoint() -> dict[str, str]:
     scheduler = get_training_scheduler()
     scheduler.stop()
     return {"status": "scheduler_stopped"}
+
+
+# =============================================================================
+# Async Training Job Routes (Phase 10C)
+# =============================================================================
+
+
+@router.post(
+    "/jobs",
+    response_model=TrainingJobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_training_job_endpoint(
+    request: TrainingJobRequest,
+) -> TrainingJobResponse:
+    """Start an async training job.
+
+    Returns immediately with job_id. Training runs in background.
+    Poll GET /training/jobs/{job_id} for progress.
+    """
+    executor = get_training_executor()
+
+    job_id = await executor.start_job(
+        symbol=request.symbol,
+        generations=request.generations,
+        population_size=request.population_size,
+        training_capital=request.training_capital,
+        checkpoint_interval=request.checkpoint_interval,
+        strategy_type=request.strategy_type,
+    )
+
+    return TrainingJobResponse(
+        job_id=job_id,
+        symbol=request.symbol,
+        status="queued",
+        generations_total=request.generations,
+        generations_completed=0,
+        progress_pct=0.0,
+        started_at=datetime.utcnow(),
+    )
+
+
+@router.get(
+    "/jobs",
+    response_model=TrainingJobListResponse,
+)
+async def list_training_jobs_endpoint(
+    status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> TrainingJobListResponse:
+    """List all training jobs.
+
+    Returns jobs from Redis cache. Jobs expire after 7 days.
+    """
+    # TODO: Implement job listing from Redis pattern scan
+    # For now, return empty list
+    return TrainingJobListResponse(jobs=[], total=0)
+
+
+@router.get(
+    "/jobs/{job_id}",
+    response_model=TrainingJobDetailResponse,
+)
+async def get_training_job_endpoint(
+    job_id: str = Path(..., min_length=1),
+) -> TrainingJobDetailResponse:
+    """Get training job status and progress.
+
+    Returns current generation, fitness, checkpoints, and plot data.
+    """
+    executor = get_training_executor()
+    job_data = await executor.get_job_status(job_id)
+
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found",
+        )
+
+    # Map checkpoints
+    checkpoints = [
+        TrainingCheckpointResponse(
+            generation=c["generation"],
+            model_id=c["model_id"],
+            fitness=c["fitness"],
+            roi=c.get("roi"),
+            created_at=datetime.fromisoformat(c["created_at"]),
+        )
+        for c in job_data.get("checkpoints", [])
+    ]
+
+    return TrainingJobDetailResponse(
+        job_id=job_data["id"],
+        symbol=job_data["symbol"],
+        status=job_data["status"],
+        generations_total=job_data["generations_total"],
+        generations_completed=job_data.get("generations_completed", 0),
+        best_fitness=job_data.get("best_fitness"),
+        progress_pct=job_data.get("progress_pct", 0.0),
+        started_at=(
+            datetime.fromisoformat(job_data["started_at"])
+            if job_data.get("started_at")
+            else None
+        ),
+        checkpoints=checkpoints,
+        current_plot=None,  # TODO: Add plot generation
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/checkpoints",
+    response_model=list[TrainingCheckpointResponse],
+)
+async def list_training_checkpoints_endpoint(
+    job_id: str = Path(..., min_length=1),
+) -> list[TrainingCheckpointResponse]:
+    """List all checkpoints for a training job.
+
+    Checkpoints are saved every N generations.
+    """
+    executor = get_training_executor()
+    checkpoints = await executor.get_checkpoints(job_id)
+
+    return [
+        TrainingCheckpointResponse(
+            generation=c["generation"],
+            model_id=c["model_id"],
+            fitness=c["fitness"],
+            roi=c.get("roi"),
+            created_at=datetime.fromisoformat(c["created_at"]),
+        )
+        for c in checkpoints
+    ]
+
+
+@router.post(
+    "/jobs/{job_id}/select-checkpoint",
+    response_model=SelectCheckpointResponse,
+)
+async def select_checkpoint_endpoint(
+    request: SelectCheckpointRequest,
+    job_id: str = Path(..., min_length=1),
+) -> SelectCheckpointResponse:
+    """Select a checkpoint for deployment.
+
+    Activates the checkpoint genome for use in live trading.
+    """
+    executor = get_training_executor()
+    result = await executor.select_checkpoint(job_id, request.generation)
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Checkpoint gen {request.generation} not found for job {job_id}",
+        )
+
+    return SelectCheckpointResponse(**result)

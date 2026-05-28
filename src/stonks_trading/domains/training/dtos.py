@@ -186,3 +186,73 @@ class TriggerRetrainingResponse(BaseResponse):
     job_id: str
     results: list[dict[str, Any]] = Field(default_factory=list)
     completed_at: datetime
+
+
+# =============================================================================
+# Async Training Job DTOs (Phase 10C)
+# =============================================================================
+
+
+class TrainingCheckpointResponse(BaseResponse):
+    """Training checkpoint response."""
+
+    generation: int
+    model_id: str
+    fitness: float
+    roi: float | None = None
+    created_at: datetime
+
+
+class TrainingJobRequest(BaseModel):
+    """Request to start async training job."""
+
+    symbol: str = Field(..., min_length=1, max_length=20)
+    generations: int = Field(default=30, ge=1, le=100)
+    population_size: int = Field(default=150, ge=10, le=500)
+    training_capital: float = Field(default=100000.0, ge=1000)
+    checkpoint_interval: int = Field(default=5, ge=1, le=10)
+    strategy_type: str = Field(default="neat_swing", min_length=1, max_length=50)
+
+
+class TrainingJobResponse(BaseResponse):
+    """Async training job response."""
+
+    job_id: str
+    symbol: str
+    status: str  # queued | running | completed | failed
+    generations_total: int
+    generations_completed: int = 0
+    best_fitness: float | None = None
+    progress_pct: float = 0.0
+    started_at: datetime | None = None
+    estimated_completion: datetime | None = None
+
+
+class TrainingJobDetailResponse(TrainingJobResponse):
+    """Detailed training job response with checkpoints."""
+
+    checkpoints: list[TrainingCheckpointResponse] = Field(default_factory=list)
+    current_plot: str | None = None  # Plotly HTML or data URL
+
+
+class TrainingJobListResponse(BaseResponse):
+    """List of training jobs."""
+
+    jobs: list[TrainingJobResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class SelectCheckpointRequest(BaseModel):
+    """Request to select checkpoint for deployment."""
+
+    generation: int = Field(..., ge=1)
+
+
+class SelectCheckpointResponse(BaseResponse):
+    """Response after selecting checkpoint."""
+
+    job_id: str
+    generation: int
+    model_id: str
+    activated: bool
+    message: str
