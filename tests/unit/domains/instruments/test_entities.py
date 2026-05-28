@@ -1,4 +1,4 @@
-"""Unit tests for market data domain.
+"""Unit tests for instruments domain.
 
 Tests entities and adapter patterns.
 """
@@ -7,8 +7,8 @@ from datetime import datetime
 
 import pytest
 
-from stonks_trading.domains.market_data.entities import Candle, OrderBook, Tick, TimeRange
-from stonks_trading.domains.market_data.adapters import IExchangeAdapter
+from stonks_trading.domains.instruments.entities import Candle, OrderBook, Tick, TimeRange
+from stonks_trading.domains.instruments.adapters import IExchangeAdapter
 from stonks_trading.domains.trading.value_objects import Symbol
 
 

@@ -1,7 +1,7 @@
-"""Market data domain entities.
+"""Instrument domain entities.
 
 Pure dataclasses with zero framework dependencies.
-Represents market data concepts.
+Includes both Instrument registry entities AND market data entities.
 """
 
 from __future__ import annotations
@@ -9,6 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+# =============================================================================
+# Market Data Entities (moved from market_data domain)
+# =============================================================================
 
 
 @dataclass
@@ -158,3 +162,66 @@ class TimeRange:
     def overlaps(self, other: TimeRange) -> bool:
         """Check if another time range overlaps."""
         return self.start < other.end and other.start < self.end
+
+
+# =============================================================================
+# Instrument Registry Entity
+# =============================================================================
+
+
+@dataclass
+class Instrument:
+    """Trading instrument metadata.
+
+    Represents a registered trading symbol with metadata.
+    """
+
+    symbol: str
+    name: str = ""
+    enabled: bool = False
+    auto_backfill: bool = True
+    backfill_days: int = 730
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+    last_backfill_at: datetime | None = None
+    backfill_job_id: str | None = None
+    status: str = "pending"  # pending, backfilling, ready, error
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "symbol": self.symbol,
+            "name": self.name,
+            "enabled": self.enabled,
+            "auto_backfill": self.auto_backfill,
+            "backfill_days": self.backfill_days,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "last_backfill_at": self.last_backfill_at.isoformat()
+            if self.last_backfill_at
+            else None,
+            "backfill_job_id": self.backfill_job_id,
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Instrument:
+        """Create from dictionary."""
+        return cls(
+            symbol=data.get("symbol", ""),
+            name=data.get("name", ""),
+            enabled=data.get("enabled", False),
+            auto_backfill=data.get("auto_backfill", True),
+            backfill_days=data.get("backfill_days", 730),
+            created_at=datetime.fromisoformat(data["created_at"])
+            if data.get("created_at")
+            else datetime.utcnow(),
+            updated_at=datetime.fromisoformat(data["updated_at"])
+            if data.get("updated_at")
+            else datetime.utcnow(),
+            last_backfill_at=datetime.fromisoformat(data["last_backfill_at"])
+            if data.get("last_backfill_at")
+            else None,
+            backfill_job_id=data.get("backfill_job_id"),
+            status=data.get("status", "pending"),
+        )

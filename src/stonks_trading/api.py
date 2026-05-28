@@ -14,8 +14,8 @@ from tortoise.contrib.fastapi import register_tortoise
 
 from stonks_trading.domains.backtesting.routes import router as backtest_router
 from stonks_trading.domains.botcontrol.routes import get_botcontrol_router
-from stonks_trading.domains.capital.routes import get_capital_router
 from stonks_trading.domains.health.routes import get_health_router
+from stonks_trading.domains.instruments.routes import router as instruments_router
 from stonks_trading.domains.reconciliation.routes import get_reconciliation_router
 from stonks_trading.domains.strategies.routes import get_strategies_router
 from stonks_trading.domains.trading.routes import get_trading_router
@@ -121,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(get_trading_router(), prefix="/api/v1", tags=["trading"])
     app.include_router(training_router, prefix="/api/v1", tags=["training"])
     app.include_router(backtest_router, prefix="/api/v1", tags=["backtesting"])
+    app.include_router(instruments_router, prefix="/api/v1", tags=["instruments"])
     # Reconciliation router (Phase 9C)
     app.include_router(
         get_reconciliation_router(),
@@ -132,12 +133,6 @@ def create_app() -> FastAPI:
         get_botcontrol_router(),
         prefix="/api/v1",
         tags=["bot-control"],
-    )
-    # Capital Management router (Phase 10F)
-    app.include_router(
-        get_capital_router(),
-        prefix="/api/v1",
-        tags=["capital"],
     )
     # Strategy Management router (Phase 10G)
     app.include_router(

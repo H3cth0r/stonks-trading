@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from stonks_trading.bots.base.context import BotContext
-from stonks_trading.domains.market_data.services import (
+from stonks_trading.domains.instruments.services import (
     backfill_from_massive,
     get_job_status,
     set_job_status,
@@ -638,6 +638,27 @@ async def get_balances_endpoint() -> VenueBalanceListResponse:
             )
 
         return VenueBalanceListResponse(venues=venues)
+    finally:
+        await adapter.close()
+
+
+@balances_router.get(
+    "/usdt",
+    response_model=dict[str, float],
+)
+async def get_usdt_balance() -> dict[str, float]:
+    """Get USDT balance for deployment validation.
+
+    Returns simple {balance: X.XX} format for easy checking.
+    """
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        use_case = FetchBalancesUseCase(adapter)
+        balances = await use_case.execute()
+
+        usdt_balance = next((b.total for b in balances if b.asset == "USDT"), 0.0)
+
+        return {"balance": usdt_balance}
     finally:
         await adapter.close()
 

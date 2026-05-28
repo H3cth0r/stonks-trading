@@ -26,6 +26,7 @@ from stonks_trading.domains.botcontrol.use_cases import (
     StartBotUseCase,
     StopBotUseCase,
 )
+from stonks_trading.shared.redis_client import get_equity_history
 
 # =============================================================================
 # Router Factory Pattern
@@ -213,6 +214,44 @@ def get_botcontrol_router() -> APIRouter:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e),
             ) from e
+
+    @router.get(
+        "/bots/{bot_type}/{instance_id}/equity-history",
+        responses={
+            404: {"model": ErrorResponse, "description": "Bot not found"},
+        },
+    )
+    async def get_bot_equity_history(
+        bot_type: str = Path(..., description="Bot type", min_length=1),
+        instance_id: str = Path(..., description="Bot instance ID", min_length=1),
+        limit: int = Query(default=100, description="Number of points to return", ge=1, le=1000),
+    ) -> dict[str, Any]:
+        """Get equity history for bot.
+
+        Returns historical equity data points for charting.
+        """
+        from datetime import datetime, timedelta
+
+        history = await get_equity_history(bot_type, instance_id, limit)
+
+        # Convert to list of {timestamp, equity} objects
+        # History is stored oldest first in Redis, but lrange returns newest first
+        # Reverse to get chronological order
+        history_reversed = list(reversed(history))
+
+        now = datetime.utcnow()
+        points = []
+        for i, equity in enumerate(history_reversed):
+            # Estimate timestamp based on position (assuming ~30s intervals)
+            timestamp = now - timedelta(seconds=(len(history_reversed) - i) * 30)
+            points.append(
+                {
+                    "timestamp": timestamp.isoformat(),
+                    "equity": equity,
+                }
+            )
+
+        return {"history": points}
 
     return router
 
