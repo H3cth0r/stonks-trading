@@ -33,15 +33,9 @@ with tab_market:
         index=1,
     )
 
-    # Backfill Days Configuration
-    st.sidebar.header("Backfill Options")
-    backfill_days = st.sidebar.number_input(
-        "Days to backfill",
-        min_value=1,
-        max_value=730,
-        value=7,
-        help="Number of days of historical data to download (max 730 = 2 years)",
-    )
+    # Backfill Status (for info only - auto-backfill is default)
+    st.sidebar.header("Instrument Status")
+    st.sidebar.info("New instruments auto-backfill 2 years of data on registration.")
 
     # Check for job_id in query params
     query_params = st.query_params
@@ -78,81 +72,92 @@ with tab_market:
 
     symbol_options = symbol_options + ["+ Register New Symbol"]
 
+    # Show instrument status indicator
+    if instruments_data and instruments_data.get("instruments"):
+        instruments = instruments_data["instruments"]
+        st.subheader("Registered Instruments")
+
+        # Show instruments with status
+        for inst in instruments[:10]:  # Show first 10
+            symbol = inst.get("symbol", "Unknown")
+            enabled = inst.get("enabled", False)
+            status = "✅" if enabled else "⏸️"
+            st.caption(f"{status} {symbol}")
+
     col1, col2 = st.columns([3, 1])
 
     with col1:
-        # Default to BTC_USD if in list, otherwise first item
+        # Default to first instrument or BTC_USD
         default_idx = 0
-        if "BTC_USD" in symbol_options:
+        if len(symbol_options) > 1 and "BTC_USD" in symbol_options:
             default_idx = symbol_options.index("BTC_USD")
         selected_symbol = st.selectbox(
-            "Symbol",
+            "Select Instrument",
             options=symbol_options,
             index=default_idx,
-            help="Select a registered instrument",
+            help="Choose a registered instrument or register a new one",
         )
 
+    # Register New Instrument Form
     if selected_symbol == "+ Register New Symbol":
-        with st.expander("Register New Instrument"):
-            new_symbol = (
-                st.text_input(
-                    "New Symbol (e.g., SOL_USD)",
-                    value="",
-                    help="Enter symbol in format: SYMBOL_USD",
-                )
-                .strip()
-                .upper()
+        st.divider()
+        st.subheader("📝 Register New Instrument")
+
+        # Get available symbols not yet registered
+        common_symbols = ["SOL_USD", "ADA_USD", "DOT_USD", "LINK_USD", "AVAX_USD"]
+        existing_symbols = set(symbol_options) - {"+ Register New Symbol"}
+        suggested = [s for s in common_symbols if s not in existing_symbols][:3]
+
+        if suggested:
+            st.caption(f"Suggestions: {', '.join(suggested)}")
+
+        new_symbol = (
+            st.text_input(
+                "Symbol (e.g., SOL_USD)",
+                value="",
+                placeholder="Enter symbol in format: SYMBOL_USD",
+                help="New instruments automatically download 2 years of historical data",
             )
-            auto_backfill = st.checkbox("Auto-backfill 2 years", value=True)
-            if st.button("Register"):
-                if new_symbol:
+            .strip()
+            .upper()
+        )
+
+        col_reg1, col_reg2 = st.columns([1, 3])
+        with col_reg1:
+            if new_symbol and st.button("Register", type="primary"):
+                with st.spinner(f"Registering {new_symbol}..."):
                     response = post_sync(
                         "/api/v1/instruments",
-                        {"symbol": new_symbol, "auto_backfill": auto_backfill},
+                        {"symbol": new_symbol, "auto_backfill": True, "backfill_days": 730},
                     )
                     if response:
-                        st.success(f"Registered {new_symbol}")
+                        st.success(f"✅ Registered {new_symbol}! Backfilling 2 years of data...")
+                        st.session_state.new_instrument_registered = new_symbol
                         st.rerun()
                     else:
-                        st.error("Failed to register instrument")
+                        st.error("❌ Failed to register instrument")
 
+        with col_reg2:
+            st.info(
+                "Registration automatically downloads 2 years of historical data from Massive API"
+            )
+
+        # Show backfill progress for newly registered instrument
+        if "new_instrument_registered" in st.session_state:
+            new_sym = st.session_state.new_instrument_registered
+            st.info(f"⏳ Backfilling {new_sym}... This may take a few minutes.")
+            # Clear after showing once
+            del st.session_state.new_instrument_registered
+
+        # Fallback selection
         if not selected_symbol or selected_symbol == "+ Register New Symbol":
-            selected_symbol = "BTC_USD"
+            selected_symbol = (
+                symbol_options[0]
+                if symbol_options and symbol_options[0] != "+ Register New Symbol"
+                else "BTC_USD"
+            )
 
     ticker = selected_symbol
-
-    with col2:
-        st.markdown("###")
-        backfill_btn = st.button("Start Backfill", type="primary")
-
-    # Backfill Progress
-    if "backfill_job_id" in st.session_state:
-        job_id = st.session_state.backfill_job_id
-        status = fetch_sync(f"/api/v1/backfill/jobs/{job_id}")
-
-        if status:
-            if status.get("status") == "running":
-                progress = status.get("progress", 0)
-                st.progress(progress)
-                st.text(f"Downloading... {progress * 100:.0f}%")
-                st.query_params["job_id"] = job_id
-            elif status.get("status") == "completed":
-                st.success(f"Downloaded {status.get('candles_downloaded', 0):,} candles")
-                st.query_params["job_id"] = job_id
-            elif status.get("status") == "failed":
-                st.error(f"Backfill failed: {status.get('error', 'Unknown error')}")
-                st.query_params["job_id"] = job_id
-
-    # Backfill Button Handler
-    if backfill_btn and ticker:
-        response = post_sync(
-            "/api/v1/backfill/massive",
-            {"symbol": ticker, "days": backfill_days},
-        )
-        if response and "job_id" in response:
-            st.session_state.backfill_job_id = response["job_id"]
-            st.query_params["job_id"] = response["job_id"]
-            st.rerun()
 
     # Price Chart
     st.markdown("### Price Chart")
