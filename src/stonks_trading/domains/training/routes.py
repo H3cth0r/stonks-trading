@@ -29,6 +29,8 @@ from stonks_trading.domains.training.dtos import (
     TrainingJobListResponse,
     TrainingJobRequest,
     TrainingJobResponse,
+    TrainingPlotResponse,
+    TrainingProgressPlotResponse,
     TrainingProgressResponse,
     TrainingRunListResponse,
     TrainingRunRequest,
@@ -578,9 +580,7 @@ async def get_training_job_endpoint(
         best_fitness=job_data.get("best_fitness"),
         progress_pct=job_data.get("progress_pct", 0.0),
         started_at=(
-            datetime.fromisoformat(job_data["started_at"])
-            if job_data.get("started_at")
-            else None
+            datetime.fromisoformat(job_data["started_at"]) if job_data.get("started_at") else None
         ),
         checkpoints=checkpoints,
         current_plot=None,  # TODO: Add plot generation
@@ -635,3 +635,260 @@ async def select_checkpoint_endpoint(
         )
 
     return SelectCheckpointResponse(**result)
+
+
+# =============================================================================
+# Training Plot Endpoints (Phase 3)
+# =============================================================================
+
+
+@router.get(
+    "/jobs/{job_id}/plot",
+    response_model=TrainingPlotResponse,
+)
+async def get_training_plot_endpoint(
+    job_id: str = Path(..., min_length=1),
+) -> TrainingPlotResponse:
+    """Get current training plot with fitness curve.
+
+    Returns Plotly HTML for the current training progress.
+    """
+    executor = get_training_executor()
+    job_data = await executor.get_job_status(job_id)
+
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found",
+        )
+
+    # Generate fitness curve plot from checkpoints
+    checkpoints = job_data.get("checkpoints", [])
+    plot_html = _generate_fitness_plot_html(checkpoints, job_data.get("symbol", ""))
+
+    return TrainingPlotResponse(
+        job_id=job_id,
+        plot_html=plot_html,
+        generation=job_data.get("generations_completed"),
+        fitness=job_data.get("best_fitness"),
+        created_at=datetime.utcnow(),
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/checkpoints/{generation}/plot",
+    response_model=TrainingPlotResponse,
+)
+async def get_checkpoint_plot_endpoint(
+    job_id: str = Path(..., min_length=1),
+    generation: int = Path(..., ge=1),
+) -> TrainingPlotResponse:
+    """Get plot for a specific checkpoint.
+
+    Shows the equity curve at that specific generation.
+    """
+    executor = get_training_executor()
+    job_data = await executor.get_job_status(job_id)
+
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found",
+        )
+
+    checkpoints = job_data.get("checkpoints", [])
+    checkpoint = next((c for c in checkpoints if c["generation"] == generation), None)
+
+    if not checkpoint:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Checkpoint generation {generation} not found for job {job_id}",
+        )
+
+    # Generate plot for specific checkpoint
+    plot_html = _generate_checkpoint_plot_html(checkpoint, job_data.get("symbol", ""))
+
+    return TrainingPlotResponse(
+        job_id=job_id,
+        plot_html=plot_html,
+        generation=generation,
+        fitness=checkpoint.get("fitness"),
+        created_at=datetime.fromisoformat(checkpoint["created_at"]),
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/progress-plot",
+    response_model=TrainingProgressPlotResponse,
+)
+async def get_training_progress_plot_endpoint(
+    job_id: str = Path(..., min_length=1),
+) -> TrainingProgressPlotResponse:
+    """Get training progress data for live plotting.
+
+    Returns structured data for client-side Plotly rendering.
+    """
+    executor = get_training_executor()
+    job_data = await executor.get_job_status(job_id)
+
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found",
+        )
+
+    checkpoints = job_data.get("checkpoints", [])
+    generations = [c["generation"] for c in checkpoints]
+    fitness_values = [c["fitness"] for c in checkpoints]
+
+    # Build Plotly-compatible data structure
+    plot_data = {
+        "data": [
+            {
+                "x": generations,
+                "y": fitness_values,
+                "type": "scatter",
+                "mode": "lines+markers",
+                "name": "Fitness",
+                "line": {"color": "#00CC96", "width": 2},
+                "marker": {"size": 8},
+            }
+        ],
+        "layout": {
+            "title": f"Training Progress - {job_data.get('symbol', '')}",
+            "xaxis": {"title": "Generation"},
+            "yaxis": {"title": "Fitness"},
+            "showlegend": True,
+        },
+    }
+
+    return TrainingProgressPlotResponse(
+        job_id=job_id,
+        plot_data=plot_data,
+        generations=generations,
+        fitness_values=fitness_values,
+        updated_at=datetime.utcnow(),
+    )
+
+
+def _generate_fitness_plot_html(checkpoints: list[dict], symbol: str) -> str:
+    """Generate Plotly HTML for fitness curve.
+
+    Args:
+        checkpoints: List of checkpoint dicts with generation and fitness
+        symbol: Trading symbol
+
+    Returns:
+        Plotly HTML string
+    """
+    if not checkpoints:
+        return "<div>No checkpoint data available yet</div>"
+
+    try:
+        import json
+
+        generations = [c["generation"] for c in checkpoints]
+        fitness_values = [c["fitness"] for c in checkpoints]
+
+        # Build Plotly figure config
+        fig_config = {
+            "data": [
+                {
+                    "x": generations,
+                    "y": fitness_values,
+                    "type": "scatter",
+                    "mode": "lines+markers",
+                    "name": "Best Fitness",
+                    "line": {"color": "#00CC96", "width": 3},
+                    "marker": {"size": 10, "color": "#00CC96"},
+                }
+            ],
+            "layout": {
+                "title": {
+                    "text": f"Training Fitness - {symbol}",
+                    "font": {"size": 16},
+                },
+                "xaxis": {
+                    "title": "Generation",
+                    "gridcolor": "#333",
+                },
+                "yaxis": {
+                    "title": "Fitness",
+                    "gridcolor": "#333",
+                },
+                "paper_bgcolor": "rgba(0,0,0,0)",
+                "plot_bgcolor": "rgba(0,0,0,0)",
+                "showlegend": False,
+            },
+        }
+
+        # Return as JSON-embedded HTML for client-side rendering
+        return f"""
+        <div id="training-plot-{symbol}" style="width:100%;height:400px;"></div>
+        <script>
+            (function() {{
+                var data = {json.dumps(fig_config["data"])};
+                var layout = {json.dumps(fig_config["layout"])};
+                Plotly.newPlot('training-plot-{symbol}', data, layout, {{responsive: true}});
+            }})();
+        </script>
+        """
+    except Exception as e:
+        return f"<div>Error generating plot: {e}</div>"
+
+
+def _generate_checkpoint_plot_html(checkpoint: dict, symbol: str) -> str:
+    """Generate Plotly HTML for specific checkpoint.
+
+    Args:
+        checkpoint: Checkpoint dict with generation, fitness, roi
+        symbol: Trading symbol
+
+    Returns:
+        Plotly HTML string
+    """
+    try:
+        import json
+
+        gen = checkpoint["generation"]
+        fitness = checkpoint.get("fitness", 0)
+        roi = checkpoint.get("roi", 0)
+
+        # Simple metric display for now
+        # In production, this would show the actual equity curve from that checkpoint
+        fig_config = {
+            "data": [
+                {
+                    "type": "indicator",
+                    "mode": "number+delta",
+                    "value": fitness,
+                    "title": {"text": "Fitness"},
+                    "domain": {"row": 0, "column": 0},
+                },
+                {
+                    "type": "indicator",
+                    "mode": "number+delta",
+                    "value": roi,
+                    "title": {"text": "ROI %"},
+                    "domain": {"row": 0, "column": 1},
+                },
+            ],
+            "layout": {
+                "title": f"Checkpoint Gen {gen} - {symbol}",
+                "grid": {"rows": 1, "columns": 2},
+                "paper_bgcolor": "rgba(0,0,0,0)",
+            },
+        }
+
+        return f"""
+        <div id="checkpoint-plot-{gen}" style="width:100%;height:300px;"></div>
+        <script>
+            (function() {{
+                var data = {json.dumps(fig_config["data"])};
+                var layout = {json.dumps(fig_config["layout"])};
+                Plotly.newPlot('checkpoint-plot-{gen}', data, layout, {{responsive: true}});
+            }})();
+        </script>
+        """
+    except Exception as e:
+        return f"<div>Error generating checkpoint plot: {e}</div>"

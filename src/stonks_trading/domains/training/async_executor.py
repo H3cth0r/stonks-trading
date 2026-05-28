@@ -10,6 +10,7 @@ from typing import Any
 
 from stonks_trading.shared.logger import logger
 from stonks_trading.shared.redis_client import get_redis
+from stonks_trading.shared.websocket_api import broadcast_training_progress
 
 
 class AsyncTrainingExecutor:
@@ -180,9 +181,7 @@ class AsyncTrainingExecutor:
 
             # Estimate completion time (rough estimate: ~30s per generation)
             estimated_duration = timedelta(seconds=generations * 30)
-            job_data["estimated_completion"] = (
-                datetime.utcnow() + estimated_duration
-            ).isoformat()
+            job_data["estimated_completion"] = (datetime.utcnow() + estimated_duration).isoformat()
 
             await self._save_job_state(job_id, job_data)
 
@@ -197,10 +196,22 @@ class AsyncTrainingExecutor:
 
             # Mark as completed
             job_data = await self._load_job_state(job_id)
+            checkpoints = job_data.get("checkpoints", [])
             job_data["status"] = "completed"
             job_data["progress_pct"] = 100.0
             job_data["updated_at"] = datetime.utcnow().isoformat()
             await self._save_job_state(job_id, job_data)
+
+            # Broadcast completion via WebSocket (Phase 3)
+            broadcast_training_progress(
+                job_id=job_id,
+                generation=generations,
+                total_generations=generations,
+                best_fitness=job_data.get("best_fitness", 0),
+                progress_pct=100.0,
+                status="completed",
+                checkpoints=checkpoints,
+            )
 
             logger.info(f"Training job {job_id} completed")
 
@@ -235,6 +246,7 @@ class AsyncTrainingExecutor:
 
             # Calculate fitness (simulated improvement curve)
             import math
+
             base_fitness = 0.5
             improvement = math.log(gen + 1) * 0.3
             noise = (gen % 5) * 0.02
@@ -252,6 +264,7 @@ class AsyncTrainingExecutor:
             job_data["updated_at"] = datetime.utcnow().isoformat()
 
             # Save checkpoint
+            checkpoints = job_data.get("checkpoints", [])
             if gen % checkpoint_interval == 0:
                 checkpoint = {
                     "generation": gen,
@@ -260,10 +273,22 @@ class AsyncTrainingExecutor:
                     "roi": fitness * 15,  # Simulated ROI
                     "created_at": datetime.utcnow().isoformat(),
                 }
-                job_data["checkpoints"].append(checkpoint)
+                checkpoints.append(checkpoint)
+                job_data["checkpoints"] = checkpoints
                 logger.info(f"Job {job_id}: Saved checkpoint at gen {gen}")
 
             await self._save_job_state(job_id, job_data)
+
+            # Broadcast WebSocket update (Phase 3)
+            broadcast_training_progress(
+                job_id=job_id,
+                generation=gen,
+                total_generations=generations,
+                best_fitness=fitness,
+                progress_pct=(gen / generations) * 100,
+                status="running",
+                checkpoints=checkpoints,
+            )
 
     async def _save_job_state(self, job_id: str, job_data: dict[str, Any]) -> None:
         """Save job state to Redis.

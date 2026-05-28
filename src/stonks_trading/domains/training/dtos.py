@@ -256,3 +256,23 @@ class SelectCheckpointResponse(BaseResponse):
     model_id: str
     activated: bool
     message: str
+
+
+class TrainingPlotResponse(BaseResponse):
+    """Training plot response with Plotly HTML."""
+
+    job_id: str
+    plot_html: str
+    generation: int | None = None  # If specific checkpoint, else None for current
+    fitness: float | None = None
+    created_at: datetime | None = None
+
+
+class TrainingProgressPlotResponse(BaseResponse):
+    """Training progress plot response."""
+
+    job_id: str
+    plot_data: dict[str, Any]  # Plotly JSON data for rendering
+    generations: list[int] = Field(default_factory=list)
+    fitness_values: list[float] = Field(default_factory=list)
+    updated_at: datetime
