@@ -22,6 +22,21 @@ period = st.sidebar.selectbox(
     index=1,
 )
 
+# === Backfill Days Configuration ===
+st.sidebar.header("Backfill Options")
+backfill_days = st.sidebar.number_input(
+    "Days to backfill",
+    min_value=1,
+    max_value=730,
+    value=7,
+    help="Number of days of historical data to download (max 730 = 2 years)",
+)
+
+# === Check for job_id in query params (for status persistence) ===
+query_params = st.query_params
+if "job_id" in query_params and "backfill_job_id" not in st.session_state:
+    st.session_state.backfill_job_id = query_params["job_id"]
+
 
 def get_period_filter(period: str) -> tuple[datetime, datetime | None]:
     """Convert period string to start/end datetimes."""
@@ -70,21 +85,25 @@ if "backfill_job_id" in st.session_state:
             progress = status.get("progress", 0)
             st.progress(progress)
             st.text(f"Downloading... {progress * 100:.0f}%")
+            # Update query params for persistence
+            st.query_params["job_id"] = job_id
         elif status.get("status") == "completed":
             st.success(f"Downloaded {status.get('candles_downloaded', 0):,} candles")
-            del st.session_state.backfill_job_id
+            # Keep job_id in query params so user can see final status on reload
+            st.query_params["job_id"] = job_id
         elif status.get("status") == "failed":
             st.error(f"Backfill failed: {status.get('error', 'Unknown error')}")
-            del st.session_state.backfill_job_id
+            st.query_params["job_id"] = job_id
 
 # === Backfill Button Handler ===
 if backfill_btn and ticker:
     response = post_sync(
         "/api/v1/backfill/massive",
-        {"symbol": ticker, "days": 730},
+        {"symbol": ticker, "days": backfill_days},
     )
     if response and "job_id" in response:
         st.session_state.backfill_job_id = response["job_id"]
+        st.query_params["job_id"] = response["job_id"]
         st.rerun()
 
 # === Price Chart ===
@@ -93,7 +112,7 @@ st.markdown("### Price Chart")
 start_dt, _ = get_period_filter(period)
 
 candles_data = fetch_sync(
-    "/api/v1/market/candles/BTC_USD",
+    f"/api/v1/market/candles/{ticker}",
     {"start": start_dt.isoformat()} if start_dt else None,
 )
 
