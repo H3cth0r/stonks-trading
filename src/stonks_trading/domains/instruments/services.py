@@ -16,9 +16,24 @@ import redis.asyncio as redis
 from stonks_trading.domains.instruments.entities import Instrument
 from stonks_trading.domains.instruments.repositories import (
     get_instrument,
+    list_instruments,
     save_instrument,
     update_instrument_status,
 )
+
+# Re-export repository functions for convenience
+__all__ = [
+    "get_instrument",
+    "list_instruments",
+    "save_instrument",
+    "register_instrument",
+    "enable_instrument",
+    "disable_instrument",
+    "get_instrument_status",
+    "backfill_from_massive",
+    "set_job_status",
+    "get_job_status",
+]
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.shared.config import settings
 from stonks_trading.shared.ingest.massive import MassiveAdapter

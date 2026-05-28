@@ -24,6 +24,7 @@ from stonks_trading.domains.training.dtos import (
     SchedulerJobResponse,
     SelectCheckpointRequest,
     SelectCheckpointResponse,
+    TrainingCheckpointResponse,
     TrainingJobDetailResponse,
     TrainingJobListResponse,
     TrainingJobRequest,

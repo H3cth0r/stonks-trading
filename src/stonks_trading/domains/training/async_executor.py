@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from stonks_trading.domains.training.entities import TrainingJob
 from stonks_trading.shared.logger import logger
 from stonks_trading.shared.redis_client import get_redis
 

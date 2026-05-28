@@ -4,6 +4,8 @@ HTTP concerns only - no business logic.
 Provides API endpoints for bot lifecycle management.
 """
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from stonks_trading.domains.botcontrol.dtos import (
