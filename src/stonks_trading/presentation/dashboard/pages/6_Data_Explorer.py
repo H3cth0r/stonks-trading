@@ -6,6 +6,7 @@ All imports at module level per CLEAN architecture.
 from datetime import datetime, timedelta
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 from stonks_trading.presentation.dashboard.utils import fetch_sync, post_sync
@@ -118,9 +119,16 @@ candles_data = fetch_sync(
 
 if candles_data and candles_data.get("candles"):
     df = pd.DataFrame(candles_data["candles"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df = df.set_index("timestamp")
-    st.line_chart(df["close"])
+    chart_df = df[["timestamp", "close"]].copy()
+    chart_df["timestamp"] = pd.to_datetime(chart_df["timestamp"])
+    chart_df["close"] = pd.to_numeric(chart_df["close"], errors="coerce")
+    chart_df = chart_df.dropna(subset=["close"])
+    chart_df = chart_df.reset_index(drop=True)
+
+    fig = px.line(chart_df, x="timestamp", y="close", title=f"{ticker} Price")
+    fig.update_layout(yaxis_title="Price (USD)", xaxis_title="Time")
+    fig.update_layout(hovermode="x unified")
+    st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No data available. Click 'Start Backfill' to download data.")
 
