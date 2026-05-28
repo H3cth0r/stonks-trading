@@ -58,42 +58,62 @@ async def backfill_from_massive(
     Returns:
         dict with job_id, status, candles_downloaded, duration_seconds
     """
+    import asyncio
+
     job_id = job_id or str(uuid.uuid4())
 
     logger.info("Starting Massive backfill", job_id=job_id, symbol=symbol, days=days)
 
-    # Initialize DuckDB
-    duckdb = DuckDBClient(db_path=duckdb_path)
-    duckdb.connect()
+    # Update status to running
+    await set_job_status(
+        job_id,
+        {"status": "running", "symbol": symbol, "progress": 0, "candles_downloaded": 0},
+    )
 
-    # Initialize adapter
-    adapter = MassiveAdapter(api_key=settings.massive_api_key)
+    def _do_backfill() -> dict[str, Any]:
+        """Run blocking backfill operations in thread."""
+        # Initialize DuckDB
+        duckdb = DuckDBClient(db_path=duckdb_path)
+        duckdb.connect()
+
+        # Initialize adapter
+        adapter = MassiveAdapter(api_key=settings.massive_api_key)
+
+        try:
+            end = datetime.utcnow()
+            start = end - timedelta(days=days)
+
+            # Fetch candles (blocking I/O)
+            symbol_obj = Symbol(value=symbol)
+            import asyncio as inner_asyncio
+
+            candles = inner_asyncio.run(adapter.backfill(symbol_obj, start, end))
+
+            # Store to DuckDB (blocking I/O)
+            count = duckdb.insert_candles_batch(candles)
+
+            return {
+                "job_id": job_id,
+                "status": "completed",
+                "symbol": symbol,
+                "candles_downloaded": count,
+                "start_date": start.isoformat(),
+                "end_date": end.isoformat(),
+            }
+
+        finally:
+            duckdb.close()
+            inner_asyncio.run(adapter.disconnect())
 
     try:
-        end = datetime.utcnow()
-        start = end - timedelta(days=days)
-
-        # Fetch candles
-        symbol_obj = Symbol(value=symbol)
-        candles = await adapter.backfill(symbol_obj, start, end)
-
-        # Store to DuckDB
-        count = duckdb.insert_candles_batch(candles)
-
-        result = {
-            "job_id": job_id,
-            "status": "completed",
-            "symbol": symbol,
-            "candles_downloaded": count,
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-        }
+        # Run blocking operations in thread pool to not block event loop
+        result = await asyncio.to_thread(_do_backfill)
 
         logger.info(
             "Massive backfill complete",
             job_id=job_id,
             symbol=symbol,
-            candles_stored=count,
+            candles_stored=result["candles_downloaded"],
         )
 
         # Update job status in Redis
@@ -101,9 +121,16 @@ async def backfill_from_massive(
 
         return result
 
-    finally:
-        duckdb.close()
-        await adapter.disconnect()
+    except Exception as e:
+        logger.error("Backfill failed", job_id=job_id, symbol=symbol, error=str(e))
+        error_result = {
+            "job_id": job_id,
+            "status": "failed",
+            "symbol": symbol,
+            "error": str(e),
+        }
+        await set_job_status(job_id, error_result)
+        raise
 
 
 async def set_job_status(job_id: str, status: dict[str, Any], ttl: int = 3600) -> None:
