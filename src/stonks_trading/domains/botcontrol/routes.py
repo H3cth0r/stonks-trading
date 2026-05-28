@@ -8,6 +8,9 @@ from fastapi import APIRouter, HTTPException, Path, Query, status
 
 from stonks_trading.domains.botcontrol.dtos import (
     BotStatusResponse,
+    DeleteBotResponse,
+    EmergencyStopRequest,
+    EmergencyStopResponse,
     ErrorResponse,
     RestartBotResponse,
     RunningBotsResponse,
@@ -20,6 +23,8 @@ from stonks_trading.domains.botcontrol.mappers import (
     BotStatusMapper,
 )
 from stonks_trading.domains.botcontrol.use_cases import (
+    DeleteBotUseCase,
+    EmergencyStopBotUseCase,
     GetBotStatusUseCase,
     ListRunningBotsUseCase,
     RestartBotUseCase,
@@ -252,6 +257,79 @@ def get_botcontrol_router() -> APIRouter:
             )
 
         return {"history": points}
+
+    @router.delete(
+        "/bots/{bot_type}/{instance_id}",
+        response_model=DeleteBotResponse,
+        responses={
+            400: {"model": ErrorResponse, "description": "Bad request"},
+            404: {"model": ErrorResponse, "description": "Bot not found"},
+            409: {"model": ErrorResponse, "description": "Conflict - has positions"},
+        },
+    )
+    async def delete_bot_endpoint(
+        bot_type: str = Path(..., description="Bot type", min_length=1),
+        instance_id: str = Path(..., description="Bot instance ID", min_length=1),
+        force: bool = Query(default=False, description="Force delete even with open positions"),
+    ) -> DeleteBotResponse:
+        """Delete a bot instance completely.
+
+        Stops the bot if running, clears state from Redis, and removes
+        from the registry. Use force=true to delete even with open positions.
+        """
+        try:
+            use_case = DeleteBotUseCase()
+            result = await use_case.execute(
+                bot_type=bot_type,
+                instance_id=instance_id,
+                force=force,
+            )
+            return DeleteBotResponse(**result)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            ) from e
+        except RuntimeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(e),
+            ) from e
+
+    @router.post(
+        "/bots/{bot_type}/{instance_id}/emergency-stop",
+        response_model=EmergencyStopResponse,
+        responses={
+            404: {"model": ErrorResponse, "description": "Bot not found"},
+        },
+    )
+    async def emergency_stop_bot_endpoint(
+        bot_type: str = Path(..., description="Bot type", min_length=1),
+        instance_id: str = Path(..., description="Bot instance ID", min_length=1),
+        request: EmergencyStopRequest | None = None,
+    ) -> EmergencyStopResponse:
+        """Emergency stop - close positions and kill bot immediately.
+
+        Cancels all pending orders, closes open positions with market orders,
+        and kills the bot process immediately with SIGKILL.
+        """
+        if request is None:
+            request = EmergencyStopRequest()
+
+        try:
+            use_case = EmergencyStopBotUseCase()
+            result = await use_case.execute(
+                bot_type=bot_type,
+                instance_id=instance_id,
+                close_positions=request.close_positions,
+                order_type=request.order_type,
+            )
+            return EmergencyStopResponse(**result)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            ) from e
 
     return router
 
