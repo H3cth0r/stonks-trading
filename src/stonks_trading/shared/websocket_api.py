@@ -320,3 +320,117 @@ def broadcast_bot_state(bot_type: str, instance_id: str, snapshot: BotStateSnaps
     """
     channel = f"bot_state:{bot_type}:{instance_id}"
     asyncio.create_task(_manager.broadcast(channel, snapshot.to_dict()))
+
+
+# =============================================================================
+# Training WebSocket (Phase 3)
+# =============================================================================
+
+
+class TrainingWebSocket:
+    """WebSocket handler for training job updates.
+
+    Broadcasts real-time training progress to dashboard clients.
+    """
+
+    def __init__(self) -> None:
+        """Initialize training WebSocket handler."""
+        self._running = False
+
+    async def connect_training(self, websocket: WebSocket, job_id: str) -> None:
+        """Accept dashboard client connection to training job channel.
+
+        Args:
+            websocket: WebSocket connection
+            job_id: Training job ID to subscribe to
+        """
+        channel = f"training:{job_id}"
+        await _manager.connect(websocket, channel)
+        self._running = True
+        logger.info(f"Training WebSocket connected: job_id={job_id}")
+
+    async def disconnect(self, websocket: WebSocket, job_id: str) -> None:
+        """Handle dashboard client disconnection from training channel.
+
+        Args:
+            websocket: WebSocket connection
+            job_id: Training job ID
+        """
+        channel = f"training:{job_id}"
+        await _manager.disconnect(websocket, channel)
+        self._running = False
+        logger.info(f"Training WebSocket disconnected: job_id={job_id}")
+
+
+def broadcast_training_progress(
+    job_id: str,
+    generation: int,
+    total_generations: int,
+    best_fitness: float,
+    progress_pct: float,
+    status: str,
+    checkpoints: list[dict[str, Any]] | None = None,
+) -> None:
+    """Broadcast training progress to all subscribed dashboard clients.
+
+    Args:
+        job_id: Training job ID
+        generation: Current generation
+        total_generations: Total generations to run
+        best_fitness: Best fitness score so far
+        progress_pct: Progress percentage (0-100)
+        status: Job status (running, completed, failed)
+        checkpoints: Optional list of checkpoint data
+    """
+    channel = f"training:{job_id}"
+    message = {
+        "type": "training_progress",
+        "job_id": job_id,
+        "generation": generation,
+        "total_generations": total_generations,
+        "best_fitness": best_fitness,
+        "progress_pct": progress_pct,
+        "status": status,
+        "checkpoints": checkpoints or [],
+        "timestamp": asyncio.get_event_loop().time(),
+    }
+    asyncio.create_task(_manager.broadcast(channel, message))
+
+
+def get_websocket_router_with_training() -> APIRouter:
+    """Create WebSocket router with training endpoint.
+
+    Returns:
+        APIRouter with WebSocket endpoints including training
+    """
+    router = get_websocket_router()
+
+    @router.websocket("/ws/training/{job_id}")
+    async def websocket_training_progress(
+        websocket: WebSocket,
+        job_id: str,
+    ) -> None:
+        """WebSocket endpoint for real-time training updates.
+
+        Dashboard connects to receive live training progress updates.
+        Messages include: generation, fitness, progress_pct, checkpoints.
+        """
+        training_ws = TrainingWebSocket()
+        await training_ws.connect_training(websocket, job_id)
+
+        try:
+            while True:
+                # Keep connection alive and handle client commands
+                data = await websocket.receive_text()
+                if data == "ping":
+                    await websocket.send_text("pong")
+                elif data == "status":
+                    # Client requesting current status
+                    await websocket.send_text(json.dumps({"type": "status_ack", "job_id": job_id}))
+        except WebSocketDisconnect:
+            await training_ws.disconnect(websocket, job_id)
+        except Exception as e:
+            logger.error(f"Training WebSocket error: {e}")
+            await training_ws.disconnect(websocket, job_id)
+
+    return router

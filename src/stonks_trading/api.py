@@ -14,8 +14,8 @@ from tortoise.contrib.fastapi import register_tortoise
 
 from stonks_trading.domains.backtesting.routes import router as backtest_router
 from stonks_trading.domains.botcontrol.routes import get_botcontrol_router
-from stonks_trading.domains.capital.routes import get_capital_router
 from stonks_trading.domains.health.routes import get_health_router
+from stonks_trading.domains.instruments.routes import router as instruments_router
 from stonks_trading.domains.reconciliation.routes import get_reconciliation_router
 from stonks_trading.domains.strategies.routes import get_strategies_router
 from stonks_trading.domains.trading.routes import get_trading_router
@@ -25,7 +25,7 @@ from stonks_trading.shared.config import settings
 from stonks_trading.shared.database import TORTOISE_ORM
 from stonks_trading.shared.logger import logger
 from stonks_trading.shared.metrics import MetricsExporter
-from stonks_trading.shared.websocket_api import get_websocket_router
+from stonks_trading.shared.websocket_api import get_websocket_router_with_training
 
 
 async def init_database() -> None:
@@ -90,9 +90,27 @@ async def lifespan(app: FastAPI):
     """Application lifespan context manager.
 
     Handles startup database initialization and shutdown cleanup.
+    Also discovers existing instruments from DuckDB and auto-registers them.
     """
     logger.info("Starting up API server...")
     await init_database()
+
+    # Discover and auto-register existing instruments from DuckDB
+    try:
+        from stonks_trading.domains.instruments.services import (
+            discover_and_register_instruments,
+        )
+
+        discovered = await discover_and_register_instruments()
+        if discovered:
+            logger.info(
+                "Auto-discovered instruments",
+                count=len(discovered),
+                instruments=[d["symbol"] for d in discovered],
+            )
+    except Exception as e:
+        logger.warning("Failed to discover instruments", error=str(e))
+
     yield
     logger.info("Shutting down API server...")
 
@@ -121,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(get_trading_router(), prefix="/api/v1", tags=["trading"])
     app.include_router(training_router, prefix="/api/v1", tags=["training"])
     app.include_router(backtest_router, prefix="/api/v1", tags=["backtesting"])
+    app.include_router(instruments_router, prefix="/api/v1", tags=["instruments"])
     # Reconciliation router (Phase 9C)
     app.include_router(
         get_reconciliation_router(),
@@ -132,12 +151,6 @@ def create_app() -> FastAPI:
         get_botcontrol_router(),
         prefix="/api/v1",
         tags=["bot-control"],
-    )
-    # Capital Management router (Phase 10F)
-    app.include_router(
-        get_capital_router(),
-        prefix="/api/v1",
-        tags=["capital"],
     )
     # Strategy Management router (Phase 10G)
     app.include_router(
@@ -151,8 +164,8 @@ def create_app() -> FastAPI:
         prefix="/api/v1",
         tags=["models"],
     )
-    # WebSocket router (Phase 10E)
-    app.include_router(get_websocket_router(), tags=["websocket"])
+    # WebSocket router (Phase 10E + 10C training updates)
+    app.include_router(get_websocket_router_with_training(), tags=["websocket"])
 
     # Register Tortoise ORM
     # generate_schemas=False because we handle initialization in lifespan

@@ -252,6 +252,64 @@ class ProcessManager:
         except (OSError, ProcessLookupError):
             return False
 
+    async def kill_process_immediately(
+        self,
+        context: BotContext,
+        pid: int | None,
+    ) -> None:
+        """Kill process with SIGKILL immediately.
+
+        Args:
+            context: BotContext identifying the bot
+            pid: Process ID to kill
+        """
+        context_key = f"{context.bot_type}/{context.instance_id}"
+
+        if context_key in self._processes:
+            process = self._processes[context_key]
+            try:
+                process.kill()
+                await process.wait()
+            except (ProcessLookupError, OSError):
+                pass
+            finally:
+                if context_key in self._processes:
+                    del self._processes[context_key]
+
+        # Also try killing by PID if provided
+        if pid:
+            try:
+                os.kill(pid, 9)  # SIGKILL
+            except (OSError, ProcessLookupError):
+                pass
+
+        logger.warning(f"Killed bot {context_key} immediately (SIGKILL)")
+
+    async def clear_bot_state(self, context: BotContext) -> None:
+        """Clear bot state from Redis.
+
+        Args:
+            context: BotContext identifying the bot
+        """
+        from stonks_trading.shared.redis_client import get_redis
+
+        redis = await get_redis()
+        context_key = f"{context.bot_type}/{context.instance_id}"
+
+        # Clear state keys
+        keys_to_delete = [
+            f"bot:state:{context_key}",
+            f"equity:history:{context_key}",
+        ]
+
+        for key in keys_to_delete:
+            try:
+                await redis.delete(key)
+            except Exception:
+                pass
+
+        logger.info(f"Cleared state for bot {context_key}")
+
 
 class BotStatusAssembler:
     """Assembles BotStatus from multiple sources."""

@@ -954,6 +954,23 @@ async def list_bot_instances_by_type(bot_type: str) -> list[BotInstance]:
     ]
 
 
+async def delete_bot_instance(bot_type: str, instance_id: str) -> bool:
+    """Delete bot instance from registry.
+
+    Args:
+        bot_type: Bot type identifier
+        instance_id: Bot instance ID
+
+    Returns:
+        True if deleted, False if not found
+    """
+    deleted = await BotInstanceModel.filter(
+        bot_type=bot_type,
+        instance_id=instance_id,
+    ).delete()
+    return bool(deleted > 0)
+
+
 # =============================================================================
 # Bot State Repository Functions (Phase 5)
 # =============================================================================

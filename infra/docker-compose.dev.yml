@@ -126,8 +126,10 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - LOG_LEVEL=DEBUG
+      - MASSIVE_API_KEY=${MASSIVE_API_KEY:-}
     volumes:
       - ../src:/app/src:ro  # Mount source for development
+      - ../data:/app/data  # Persist DuckDB data
     depends_on:
       postgres:
         condition: service_healthy

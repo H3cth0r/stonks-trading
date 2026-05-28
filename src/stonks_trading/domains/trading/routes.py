@@ -4,16 +4,24 @@ API layer - NOT imported by the bot container.
 These routes provide HTTP access to domain functionality.
 """
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from stonks_trading.bots.base.context import BotContext
+from stonks_trading.domains.instruments.services import (
+    backfill_from_massive,
+    get_job_status,
+    set_job_status,
+)
 from stonks_trading.domains.trading import repositories as repo
 from stonks_trading.domains.trading.adapters import ExchangeAdapterFactory
 from stonks_trading.domains.trading.dtos import (
     ActivityListResponse,
+    BackfillMassiveRequest,
+    BackfillMassiveResponse,
     BalanceResponse,
     BotInstanceResponse,
     BotListResponse,
@@ -23,6 +31,7 @@ from stonks_trading.domains.trading.dtos import (
     GenomeCreateRequest,
     GenomeListResponse,
     GenomeResponse,
+    JobStatusResponse,
     MarketDataListResponse,
     MarketDataResponse,
     MarketPriceListResponse,
@@ -73,6 +82,10 @@ from stonks_trading.domains.trading.use_cases import (
     PlaceOrderUseCase,
 )
 from stonks_trading.domains.trading.value_objects import Money, Symbol
+from stonks_trading.shared.storage.duckdb_client import DuckDBClient
+
+# Phase 10B - Backfill router
+backfill_router = APIRouter(prefix="/backfill", tags=["backfill"])
 
 # Create router
 trades_router = APIRouter(prefix="/trades", tags=["trades"])
@@ -447,39 +460,127 @@ async def get_candles(
     symbol: str,
     start: datetime | None = None,
     end: datetime | None = None,
+    limit: int = Query(default=1000, ge=1, le=50000),
 ) -> MarketDataListResponse:
-    """Get OHLCV candles for symbol from exchange."""
-    adapter = ExchangeAdapterFactory.create_adapter()
+    """Get OHLCV candles for symbol from DuckDB (historical data).
 
-    try:
-        use_case = GetCandlesUseCase(adapter)
-        candles = await use_case.execute(
-            symbol=Symbol(value=symbol.upper()),
-            start=start,
-            end=end,
-            limit=100,
-        )
+    First checks DuckDB for historical data, falls back to exchange
+    adapter for recent/live data if DuckDB is empty.
+    """
+    symbol_obj = Symbol(value=symbol.upper())
+    candles: list[MarketDataResponse] = []
 
-        # Convert to response format
-        candle_responses = [
-            MarketDataResponse(
-                symbol=symbol.upper(),
-                timestamp=datetime.fromtimestamp(c["timestamp"] / 1000),
-                open=c["open"],
-                high=c["high"],
-                low=c["low"],
-                close=c["close"],
-                volume=c["volume"],
+    # Strategy: Query DuckDB for historical + Binance for recent data
+    candles: list[MarketDataResponse] = []
+    now = datetime.utcnow()
+
+    # Determine what we need from each source
+    # DuckDB: Historical data up to last hour
+    # Binance: Recent data (last hour to now) for live trading
+    duckdb_end = end if end and end < now - timedelta(hours=1) else now - timedelta(hours=1)
+    effective_start = start or datetime(1970, 1, 1)
+    needs_binance = not end or end > now - timedelta(hours=1)
+    binance_start = max(effective_start, now - timedelta(hours=2)) if needs_binance else None
+
+    # Query DuckDB for historical data
+    if not end or effective_start < now - timedelta(hours=1):
+        duckdb = DuckDBClient()
+        duckdb.connect()
+        try:
+            duckdb_data = duckdb.get_data_range(
+                symbol_obj,
+                effective_start,
+                duckdb_end,
             )
-            for c in candles
-        ]
+            if duckdb_data:
+                # For large datasets, sample evenly to get representative data across time range
+                if len(duckdb_data) > limit:
+                    # Sample evenly across the time range
+                    step = len(duckdb_data) // limit
+                    sampled_data = duckdb_data[::step][:limit]
+                else:
+                    sampled_data = duckdb_data
 
-        return MarketDataListResponse(
-            symbol=symbol.upper(),
-            candles=candle_responses,
-        )
-    finally:
-        await adapter.close()
+                candles = [
+                    MarketDataResponse(
+                        symbol=symbol.upper(),
+                        timestamp=row["timestamp"],
+                        open=row["open"],
+                        high=row["high"],
+                        low=row["low"],
+                        close=row["close"],
+                        volume=row["volume"],
+                    )
+                    for row in sampled_data
+                ]
+        finally:
+            duckdb.close()
+
+    # Query Binance for recent/live data if needed
+    if binance_start and len(candles) < limit:
+        remaining = limit - len(candles)
+        adapter = ExchangeAdapterFactory.create_adapter()
+        try:
+            use_case = GetCandlesUseCase(adapter)
+            exchange_candles = await use_case.execute(
+                symbol=symbol_obj,
+                start=binance_start,
+                end=end or now,
+                limit=remaining,
+            )
+            if exchange_candles:
+                # Append Binance candles
+                binance_candle_list = [
+                    MarketDataResponse(
+                        symbol=symbol.upper(),
+                        timestamp=datetime.fromtimestamp(c["timestamp"] / 1000),
+                        open=c["open"],
+                        high=c["high"],
+                        low=c["low"],
+                        close=c["close"],
+                        volume=c["volume"],
+                    )
+                    for c in exchange_candles
+                ]
+                # Merge and deduplicate by timestamp
+                candles_by_ts = {c.timestamp: c for c in candles}
+                for c in binance_candle_list:
+                    candles_by_ts[c.timestamp] = c
+                candles = sorted(candles_by_ts.values(), key=lambda x: x.timestamp)[-limit:]
+        finally:
+            await adapter.close()
+
+    # If no data from either source, return empty
+    if not candles:
+        # Try Binance as fallback for entire range
+        adapter = ExchangeAdapterFactory.create_adapter()
+        try:
+            use_case = GetCandlesUseCase(adapter)
+            exchange_candles = await use_case.execute(
+                symbol=symbol_obj,
+                start=start,
+                end=end,
+                limit=limit,
+            )
+            candles = [
+                MarketDataResponse(
+                    symbol=symbol.upper(),
+                    timestamp=datetime.fromtimestamp(c["timestamp"] / 1000),
+                    open=c["open"],
+                    high=c["high"],
+                    low=c["low"],
+                    close=c["close"],
+                    volume=c["volume"],
+                )
+                for c in exchange_candles
+            ]
+        finally:
+            await adapter.close()
+
+    return MarketDataListResponse(
+        symbol=symbol.upper(),
+        candles=candles,
+    )
 
 
 @market_router.get(
@@ -590,6 +691,27 @@ async def get_balances_endpoint() -> VenueBalanceListResponse:
             )
 
         return VenueBalanceListResponse(venues=venues)
+    finally:
+        await adapter.close()
+
+
+@balances_router.get(
+    "/usdt",
+    response_model=dict[str, float],
+)
+async def get_usdt_balance() -> dict[str, float]:
+    """Get USDT balance for deployment validation.
+
+    Returns simple {balance: X.XX} format for easy checking.
+    """
+    adapter = ExchangeAdapterFactory.create_adapter()
+    try:
+        use_case = FetchBalancesUseCase(adapter)
+        balances = await use_case.execute()
+
+        usdt_balance = next((b.total for b in balances if b.asset == "USDT"), 0.0)
+
+        return {"balance": usdt_balance}
     finally:
         await adapter.close()
 
@@ -842,6 +964,70 @@ async def get_training_run_endpoint(
 
 
 # =============================================================================
+# Backfill Routes (Phase 10B)
+# =============================================================================
+
+
+@backfill_router.post(
+    "/massive",
+    response_model=BackfillMassiveResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def backfill_massive(request: BackfillMassiveRequest) -> BackfillMassiveResponse:
+    """Start a Massive backfill job.
+
+    Returns job_id for status polling.
+    """
+    import asyncio
+
+    estimated_chunks = (request.days // 30) + 1
+    estimated_minutes = (estimated_chunks * 65) // 60
+
+    # Generate job ID upfront for response
+    job_id = str(uuid.uuid4()) if hasattr(uuid, "uuid4") else f"job-{id(request)}"
+
+    # Initialize job status as running
+    await set_job_status(
+        job_id,
+        {
+            "job_id": job_id,
+            "status": "running",
+            "progress": 0.0,
+            "symbol": request.symbol,
+            "total_chunks": estimated_chunks,
+            "candles_downloaded": 0,
+            "error": None,
+        },
+    )
+
+    # Start backfill in background with same job_id
+    asyncio.create_task(backfill_from_massive(request.symbol, request.days, job_id=job_id))
+
+    return BackfillMassiveResponse(
+        job_id=job_id,
+        symbol=request.symbol,
+        days=request.days,
+        estimated_chunks=estimated_chunks,
+        estimated_duration_minutes=estimated_minutes,
+    )
+
+
+@backfill_router.get(
+    "/jobs/{job_id}",
+    response_model=JobStatusResponse,
+)
+async def get_backfill_job(job_id: str) -> JobStatusResponse:
+    """Get status of a backfill job."""
+    status = await get_job_status(job_id)
+    if not status:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found",
+        )
+    return JobStatusResponse(**status)
+
+
+# =============================================================================
 # Main Router Assembly
 # =============================================================================
 
@@ -864,5 +1050,7 @@ def get_trading_router() -> APIRouter:
     router.include_router(activity_router)
     router.include_router(orders_router)
     router.include_router(training_router)
+    # Phase 10B - Backfill routes
+    router.include_router(backfill_router)
 
     return router
