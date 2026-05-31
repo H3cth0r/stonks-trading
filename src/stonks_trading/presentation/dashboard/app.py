@@ -78,7 +78,11 @@ st.info("👈 Select a page from the sidebar to get started!")
 st.sidebar.markdown("---")
 st.sidebar.subheader("Connection Status")
 health = fetch_sync("/health")
-if health and health.get("status") == "healthy":
-    st.sidebar.success("✅ API Connected")
+if health and health.get("api_healthy") is True:
+    api_status = health.get("status", "unknown")
+    if api_status == "healthy":
+        st.sidebar.success("✅ API Connected")
+    else:
+        st.sidebar.warning(f"⚠️ API {api_status.title()}")
 else:
     st.sidebar.error("❌ API Disconnected")

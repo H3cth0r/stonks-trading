@@ -75,7 +75,10 @@ async def get_candle_date_range(
 
     row = await asyncio.to_thread(_query_range)
     if row and row[0] and row[1]:
-        return row[0], row[1]
+        # Ensure offset-naive datetimes for consistent comparison
+        min_date = row[0].replace(tzinfo=None) if hasattr(row[0], 'tzinfo') and row[0].tzinfo else row[0]
+        max_date = row[1].replace(tzinfo=None) if hasattr(row[1], 'tzinfo') and row[1].tzinfo else row[1]
+        return min_date, max_date
     return None, None
 
 

@@ -1,8 +1,7 @@
 """Unit tests for bot control domain services."""
 
-import os
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -145,17 +144,17 @@ class TestBotStatusAssembler:
 
 
 class TestProcessManager:
-    """Test ProcessManager service."""
+    """Test ProcessManager service (Worker-only architecture)."""
 
     def test_is_process_running(self) -> None:
-        """Check if process exists via static method."""
-        # Current Python process should be running
-        current_pid = os.getpid()
-        assert ProcessManager.is_process_running(current_pid) is True
+        """In Worker mode, API never has direct process visibility.
 
-        # Invalid PID should not be running
+        ProcessManager.is_process_running() always returns False
+        because the Worker container manages subprocesses.
+        """
+        # API container cannot see Worker subprocesses
         assert ProcessManager.is_process_running(99999) is False
-        # Note: -1 behavior varies by OS, skip or accept either result
+        assert ProcessManager.is_process_running(1) is False
 
     @pytest.mark.asyncio
     async def test_get_process_status_no_pid(self) -> None:
@@ -167,32 +166,29 @@ class TestProcessManager:
         assert status == ProcessStatus.UNKNOWN
 
     @pytest.mark.asyncio
-    async def test_get_process_status_running(self) -> None:
-        """Status is RUNNING when process exists."""
+    async def test_get_process_status_returns_unknown(self) -> None:
+        """In Worker mode, API returns UNKNOWN for all PIDs.
+
+        The API container delegates to Worker HTTP API and does not
+        have direct visibility into subprocess status.
+        """
         manager = ProcessManager()
         context = BotContext(bot_type="neat_swing", instance_id="test")
 
-        # Test with current Python process
-        status = await manager.get_process_status(context, os.getpid())
-        assert status == ProcessStatus.RUNNING
-
-    @pytest.mark.asyncio
-    async def test_get_process_status_stopped(self) -> None:
-        """Status is STOPPED when process doesn't exist."""
-        manager = ProcessManager()
-        context = BotContext(bot_type="neat_swing", instance_id="test")
-
-        # Test with invalid PID
-        status = await manager.get_process_status(context, 99999)
-        assert status == ProcessStatus.STOPPED
+        # Any PID returns UNKNOWN (Worker manages actual status)
+        status = await manager.get_process_status(context, 12345)
+        assert status == ProcessStatus.UNKNOWN
 
     @pytest.mark.asyncio
     async def test_cleanup_stale_processes(self) -> None:
-        """Mark processes with dead PIDs as ERROR."""
+        """In Worker mode, stale process cleanup is handled by Worker.
+
+        API layer returns empty list - Worker handles subprocess lifecycle.
+        """
         manager = ProcessManager()
 
-        # Create fake processes with invalid PIDs
-        stale_processes = [
+        # Create processes (Worker manages these)
+        processes = [
             BotProcess(
                 bot_type="neat_swing",
                 bot_instance_id="test-1",
@@ -209,18 +205,108 @@ class TestProcessManager:
             ),
         ]
 
-        cleaned = await manager.cleanup_stale_processes(stale_processes)
+        cleaned = await manager.cleanup_stale_processes(processes)
 
-        assert len(cleaned) == 2
-        assert all(p.status == ProcessStatus.ERROR for p in cleaned)
+        # Worker handles cleanup - API returns empty
+        assert len(cleaned) == 0
 
     @pytest.mark.asyncio
-    async def test_stop_bot_not_tracked(self) -> None:
-        """Stop bot returns UNKNOWN when process not tracked."""
+    async def test_stop_bot_delegates_to_worker(self) -> None:
+        """Stop bot delegates to Worker HTTP API.
+
+        When Worker is unavailable, returns ERROR status.
+        """
         manager = ProcessManager()
         context = BotContext(bot_type="neat_swing", instance_id="test-not-tracked")
 
         status, exit_code, error = await manager.stop_bot(context, graceful=True)
 
-        assert status == ProcessStatus.UNKNOWN
-        assert error == "Process not tracked locally"
+        # Without Worker running, we get ERROR (Worker HTTP call failed)
+        assert status == ProcessStatus.ERROR
+        assert error is not None
+        assert "Worker" in error or "nodename" in error or "servname" in error
+
+    @pytest.mark.asyncio
+    async def test_start_bot_delegates_to_worker(self) -> None:
+        """Start bot delegates to Worker HTTP API."""
+        manager = ProcessManager()
+
+        # Without Worker running, start raises RuntimeError
+        with pytest.raises(RuntimeError) as exc_info:
+            await manager.start_bot(
+                bot_type="neat_swing",
+                instance_id="test-bot",
+                symbols=["BTC_USD"],
+                mode="dry_run",
+                config_path="config-neat.txt",
+            )
+
+        assert "Worker" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_start_bot_with_mocked_worker(self) -> None:
+        """Start bot succeeds when Worker responds."""
+        from stonks_trading.domains.botcontrol.dtos import StartBotResponse
+
+        manager = ProcessManager()
+
+        # Mock the Worker HTTP client
+        mock_response = StartBotResponse(
+            bot_type="neat_swing",
+            bot_instance_id="test-bot",
+            status="starting",
+            pid=12345,
+            started_at=datetime.utcnow(),
+            message="Bot started",
+        )
+
+        with patch.object(
+            manager._worker_client,
+            'start_bot',
+            new=AsyncMock(return_value=mock_response)
+        ):
+            result = await manager.start_bot(
+                bot_type="neat_swing",
+                instance_id="test-bot",
+                symbols=["BTC_USD"],
+                mode="dry_run",
+                config_path="config-neat.txt",
+            )
+
+            assert result.bot_type == "neat_swing"
+            assert result.bot_instance_id == "test-bot"
+            assert result.pid == 12345
+            assert result.status == ProcessStatus.STARTING
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_with_mocked_worker(self) -> None:
+        """Stop bot succeeds when Worker responds."""
+        from stonks_trading.domains.botcontrol.dtos import StopBotResponse
+
+        manager = ProcessManager()
+        context = BotContext(bot_type="neat_swing", instance_id="test-bot")
+
+        # Mock the Worker HTTP client
+        mock_response = StopBotResponse(
+            bot_type="neat_swing",
+            bot_instance_id="test-bot",
+            status="stopped",
+            stopped_at=datetime.utcnow().isoformat(),
+            uptime_seconds=60,
+            exit_code=0,
+            message="Bot stopped gracefully",
+        )
+
+        with patch.object(
+            manager._worker_client,
+            'stop_bot',
+            new=AsyncMock(return_value=mock_response)
+        ):
+            status, exit_code, error = await manager.stop_bot(
+                context=context,
+                graceful=True,
+            )
+
+            assert status == ProcessStatus.STOPPED
+            assert exit_code == 0
+            assert "stopped" in (error or "").lower()

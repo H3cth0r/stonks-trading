@@ -1,7 +1,7 @@
-"""NEAT Swing Bot - Live trading bot implementation.
+"""NEAT Swing Bot - using IngestionOrchestrator for market data.
 
 Implements the live trading bot for NEAT swing strategy with:
-- WebSocket market data consumption
+- IngestionOrchestrator for market data and features
 - NEAT network inference for trading decisions
 - Bot-scoped position and state management
 - Risk management integration
@@ -13,6 +13,10 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from stonks_trading.shared.ingest.orchestrator import IngestionOrchestrator
+from stonks_trading.shared.logger import clear_bot_context, set_bot_context
+from stonks_trading.shared.metrics import MetricsExporter
+
 from stonks_trading.bots import BotRegistry
 from stonks_trading.bots.base.bot import BaseBot
 from stonks_trading.bots.neat_swing.scheduler_hook import get_scheduler_hook
@@ -21,6 +25,7 @@ from stonks_trading.bots.neat_swing.strategy import (
     MIN_TRADE_INTERVAL,
     NeatSwingStrategy,
 )
+
 from stonks_trading.domains.health.use_cases import RecordHeartbeatUseCase
 from stonks_trading.domains.trading.entities import Position
 from stonks_trading.domains.trading.enums import Side, TradingMode
@@ -34,8 +39,6 @@ from stonks_trading.domains.trading.repositories import (
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import ExecuteBotTradeUseCase
 from stonks_trading.domains.trading.value_objects import Symbol
-from stonks_trading.shared.logger import clear_bot_context, set_bot_context
-from stonks_trading.shared.metrics import MetricsExporter
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +84,12 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             capital_allocation=capital_allocation,
         )
         self.config_path = config_path
-        self.candle_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._running = False
-        self._websocket: Any | None = None  # Injected by runner
+        self._orchestrator: IngestionOrchestrator | None = None
+
+    def set_orchestrator(self, orchestrator: IngestionOrchestrator) -> None:
+        """Set the IngestionOrchestrator for market data."""
+        self._orchestrator = orchestrator
 
     @property
     def bot_type(self) -> str:
@@ -114,6 +120,14 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         # Register with database
         await self.register()
 
+        # NEW: Wait for orchestrator to be ready (gap backfill complete)
+        if not self._orchestrator:
+            raise RuntimeError("Orchestrator not set - call set_orchestrator() before start()")
+
+        logger.info("Waiting for IngestionOrchestrator to be ready...")
+        await self._wait_for_orchestrator_ready()
+        logger.info("IngestionOrchestrator ready - features available")
+
         # Load active genomes
         await self._load_active_genomes()
 
@@ -122,10 +136,6 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         if previous_state:
             self.state = previous_state
             logger.info(f"Loaded previous state: {len(self.state.positions)} positions")
-
-        # Connect WebSocket
-        if self._websocket:
-            await self._websocket.connect()
 
         # Start scheduler hook for daily retraining
         scheduler_hook = get_scheduler_hook()
@@ -140,14 +150,33 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         # Run main loop
         await self._main_loop()
 
+    async def _wait_for_orchestrator_ready(self) -> None:
+        """Wait until orchestrator has enough data for feature computation."""
+        max_wait = 600  # 10 minutes max (includes backfill time)
+        waited = 0
+
+        while waited < max_wait:
+            all_ready = True
+            for symbol in self.symbols:
+                stats = self._orchestrator.get_feature_computer().get_stats(symbol.value)
+                if not stats.get("has_features", False):
+                    all_ready = False
+                    logger.debug(f"Waiting for {symbol.value} - {stats.get('candles', 0)} candles")
+                    break
+
+            if all_ready:
+                logger.info("All symbols have feature buffers ready")
+                return
+
+            await asyncio.sleep(5)
+            waited += 5
+
+        logger.warning("Orchestrator warmup timeout - proceeding with partial data")
+
     async def stop(self) -> None:
         """Graceful shutdown."""
         logger.info(f"Stopping bot {self.context}")
         self._running = False
-
-        # Disconnect WebSocket
-        if self._websocket:
-            await self._websocket.disconnect()
 
         # Stop scheduler hook for daily retraining
         scheduler_hook = get_scheduler_hook()
@@ -163,12 +192,13 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         clear_bot_context()
 
     async def handle_candle(self, candle: dict[str, Any]) -> None:
-        """Queue candle for processing by main loop.
+        """Process a new candle from market data stream.
 
-        Args:
-            candle: OHLCV candle dict with 'symbol' and 'close'
+        DEPRECATED: Bot now polls IngestionOrchestrator directly.
+        Kept for abstract base class compliance.
         """
-        await self.candle_queue.put(candle)
+        # No-op: Bot now polls orchestrator in _main_loop()
+        pass
 
     async def persist_state(self) -> None:
         """Save current state to database."""
@@ -199,102 +229,122 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
                     logger.warning(f"Failed to load genome for {symbol}: {e}")
 
     async def _main_loop(self) -> None:
-        """Main loop: process candles from queue."""
+        """Main loop: poll orchestrator for features and trade."""
+        last_processed: dict[Symbol, datetime] = {}
+
         while self._running:
             try:
-                # Wait for candle with timeout
-                candle = await asyncio.wait_for(self.candle_queue.get(), timeout=60.0)
+                for symbol in self.symbols:
+                    if symbol not in self.strategy.networks:
+                        continue
 
-                symbol = Symbol(value=candle["symbol"])
-                if symbol not in self.strategy.networks:
-                    logger.debug(f"No network for {symbol}, skipping")
-                    continue
+                    # Get feature computer from orchestrator
+                    feature_computer = self._orchestrator.get_feature_computer()
 
-                # Update last candle timestamp for heartbeat
-                if "timestamp" in candle:
-                    candle_ts = candle["timestamp"]
-                    if isinstance(candle_ts, str):
-                        candle_ts = datetime.fromisoformat(candle_ts.replace("Z", "+00:00"))
-                    self.strategy.update_last_candle_timestamp(symbol, candle_ts)
+                    # Get latest candle timestamp from feature computer
+                    stats = feature_computer.get_stats(symbol.value)
+                    if not stats.get("has_features", False):
+                        continue
 
-                # Build state vector and get decision
-                state_vector = self._build_state_vector(symbol, candle)
-                buy_prob, sell_prob = self.strategy.activate_network(symbol, state_vector)
+                    # Build state vector using features from orchestrator
+                    state_vector = await self._build_state_vector(symbol)
+                    if state_vector is None:
+                        continue
 
-                # Determine action
-                action = self._determine_action(buy_prob, sell_prob, symbol)
+                    # Get decision from NEAT network
+                    buy_prob, sell_prob = self.strategy.activate_network(symbol, state_vector)
+                    action = self._determine_action(buy_prob, sell_prob, symbol)
 
-                if action:
-                    trade = await self._execute_trade(symbol, action, candle)
-                    if trade:
-                        self.state.record_trade()
-                        # Update equity estimate
-                        self.state.update_equity(
-                            self.state.current_equity
-                            + (trade.realized_pnl.amount if trade.realized_pnl else 0)
-                        )
-                        await self.persist_state()
+                    if action:
+                        # Get current price from feature computer's latest data
+                        current_price = self._get_current_price(symbol)
 
-                        # Instrument metrics
-                        MetricsExporter.increment_bot_trades(
-                            bot_type=self.bot_type,
-                            bot_instance_id=self.context.instance_id,
-                            symbol=symbol.value,
-                            side=action.value,
-                        )
-                        MetricsExporter.set_bot_equity(
-                            bot_type=self.bot_type,
-                            bot_instance_id=self.context.instance_id,
-                            equity_usd=self.state.current_equity,
-                        )
-                        # Calculate drawdown from peak and current equity
-                        drawdown_pct = 0.0
-                        if self.state.peak_equity > 0:
-                            drawdown_pct = (
-                                (self.state.peak_equity - self.state.current_equity)
-                                / self.state.peak_equity
-                                * 100
+                        trade = await self._execute_trade(symbol, action, current_price)
+                        if trade:
+                            self.state.record_trade()
+                            self.state.update_equity(
+                                self.state.current_equity
+                                + (trade.realized_pnl.amount if trade.realized_pnl else 0)
                             )
-                        MetricsExporter.set_bot_drawdown(
-                            bot_type=self.bot_type,
-                            bot_instance_id=self.context.instance_id,
-                            drawdown_pct=drawdown_pct,
-                        )
-                        position = self.state.positions.get(symbol)
-                        if position:
-                            MetricsExporter.set_bot_position(
+                            await self.persist_state()
+
+                            # Instrument metrics
+                            MetricsExporter.increment_bot_trades(
                                 bot_type=self.bot_type,
                                 bot_instance_id=self.context.instance_id,
                                 symbol=symbol.value,
-                                quantity=position.quantity,
+                                side=action.value,
                             )
+                            MetricsExporter.set_bot_equity(
+                                bot_type=self.bot_type,
+                                bot_instance_id=self.context.instance_id,
+                                equity_usd=self.state.current_equity,
+                            )
+                            # Calculate drawdown from peak and current equity
+                            drawdown_pct = 0.0
+                            if self.state.peak_equity > 0:
+                                drawdown_pct = (
+                                    (self.state.peak_equity - self.state.current_equity)
+                                    / self.state.peak_equity
+                                    * 100
+                                )
+                            MetricsExporter.set_bot_drawdown(
+                                bot_type=self.bot_type,
+                                bot_instance_id=self.context.instance_id,
+                                drawdown_pct=drawdown_pct,
+                            )
+                            position = self.state.positions.get(symbol)
+                            if position:
+                                MetricsExporter.set_bot_position(
+                                    bot_type=self.bot_type,
+                                    bot_instance_id=self.context.instance_id,
+                                    symbol=symbol.value,
+                                    quantity=position.quantity,
+                                )
 
-                        logger.info(f"Executed {action.value} for {symbol} at {candle['close']}")
+                            logger.info(f"Executed {action.value} for {symbol} at {current_price}")
 
-            except TimeoutError:
-                # Heartbeat - no candles received
-                continue
+                # Sleep between iterations (1 minute candles)
+                await asyncio.sleep(60)
+
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
-                await asyncio.sleep(60)  # Back off on error
+                await asyncio.sleep(60)
 
-    def _build_state_vector(self, symbol: Symbol, candle: dict[str, Any]) -> list[float]:
-        """Build 7-element state vector for NEAT network.
-
-        Args:
-            symbol: Trading symbol
-            candle: Current candle
-
-        Returns:
-            State vector for network activation
-        """
+    async def _build_state_vector(self, symbol: Symbol) -> list[float] | None:
+        """Build 7-element state vector using features from IngestionOrchestrator."""
         position = self.state.positions.get(symbol)
 
-        # Get market features from strategy
-        features = self.strategy.compute_features(symbol, [candle])
+        # Get features from orchestrator's LiveFeatureComputer
+        feature_computer = self._orchestrator.get_feature_computer()
+
+        # Get the feature DataFrame for this symbol
+        feature_df = feature_computer.get_feature_df(symbol.value)
+        if feature_df is None or len(feature_df) == 0:
+            return None
+
+        # Get latest feature values
+        last = feature_df.iloc[-1]
+        current_price = last["Close"]
+
+        features = {
+            "trend_1h": float(last["trend_1h"]),
+            "rsi_1h": float(last["rsi_1h"]),
+            "rsi_15m": float(last["rsi_15m"]),
+            "roc": float(last["roc"]),
+            "bb_width": float(last["bb_width"]),
+        }
 
         # Build full state vector
-        return self.strategy.build_state_vector(candle["close"], position, features)
+        return self.strategy.build_state_vector(current_price, position, features)
+
+    def _get_current_price(self, symbol: Symbol) -> float:
+        """Get current price from orchestrator's feature computer."""
+        feature_computer = self._orchestrator.get_feature_computer()
+        feature_df = feature_computer.get_feature_df(symbol.value)
+        if feature_df is not None and len(feature_df) > 0:
+            return float(feature_df.iloc[-1]["Close"])
+        return 0.0
 
     def _determine_action(self, buy_prob: float, sell_prob: float, symbol: Symbol) -> Side | None:
         """Determine trading action from NEAT output.
@@ -326,14 +376,14 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
         return self.strategy.determine_action(buy_prob, sell_prob, is_invested)
 
     async def _execute_trade(
-        self, symbol: Symbol, side: Side, candle: dict[str, Any]
+        self, symbol: Symbol, side: Side, price: float
     ) -> Any | None:
         """Execute trade via use case.
 
         Args:
             symbol: Trading symbol
             side: Buy or sell
-            candle: Current candle
+            price: Current price
 
         Returns:
             Trade entity if successful, None otherwise
@@ -344,6 +394,13 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
 
         # Get current position
         position = self.state.positions.get(symbol)
+
+        # Create candle dict for trade execution
+        candle = {
+            "symbol": symbol.value,
+            "close": price,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
         # Calculate quantity (all-in logic)
         quantity = self._calculate_quantity(symbol, candle, side, position)
@@ -436,14 +493,6 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
             if position and position.quantity > 0:
                 return position.quantity
             return 0.0
-
-    def set_websocket(self, websocket: Any) -> None:
-        """Set WebSocket client for market data.
-
-        Args:
-            websocket: WebSocket client instance
-        """
-        self._websocket = websocket
 
     async def heartbeat(self) -> None:
         """Send periodic heartbeat for health monitoring.

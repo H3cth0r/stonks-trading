@@ -257,7 +257,6 @@ filterwarnings = [
 source = ["src/stonks_trading"]
 branch = true
 omit = [
-    "*/bots/neat_swing/feature_engineering.py",
     "*/bots/neat_swing/runner.py",
     "*/presentation/dashboard/*.py",
     "*/presentation/dashboard/pages/*.py",

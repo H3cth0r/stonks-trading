@@ -9,6 +9,7 @@ This file contains persistent instructions for Claude Code to maintain project c
 - **Docker Setup**: `docs/docker-setup.md` - Container configuration
 - **Validation Guide**: `docs/validation-guide.md` - Testing procedures
 - **Implementation Plan**: `tmp/MASTER_ARCHITECTURE_PLAN.md` - Phase implementation roadmap
+- **Worker Separation Plan**: `tmp/bot-worker-separation-plan.md` - API/Worker architecture (COMPLETED)
 
 ## Non-Negotiable Patterns
 

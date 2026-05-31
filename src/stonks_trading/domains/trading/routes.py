@@ -1018,13 +1018,17 @@ async def backfill_massive(request: BackfillMassiveRequest) -> BackfillMassiveRe
 )
 async def get_backfill_job(job_id: str) -> JobStatusResponse:
     """Get status of a backfill job."""
-    status = await get_job_status(job_id)
-    if not status:
+    job_status = await get_job_status(job_id)
+    if not job_status:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job {job_id} not found",
         )
-    return JobStatusResponse(**status)
+    # Add BaseResponse required fields
+    job_status["success"] = True
+    job_status["timestamp"] = datetime.utcnow()
+    job_status["message"] = None
+    return JobStatusResponse(**job_status)
 
 
 # =============================================================================

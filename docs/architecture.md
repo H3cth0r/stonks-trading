@@ -58,12 +58,25 @@ Each domain has one `repositories.py` file with standalone functions:
 
 ### 5. Container Separation
 
-**Bot Container** (imports core domain only):
-- entities, repositories, use_cases, adapters
-- NO routes/dtos/mappers
+**API Container** (Lightweight - imports HTTP layer only):
+- FastAPI routes, DTOs, mappers
+- HTTP client for Worker communication
+- Database ORM (Tortoise)
+- Redis client
+- NO bot subprocesses
+- NO NEAT dependencies
 
-**API Container** (imports all):
-- Everything including FastAPI routes
+**Bot Worker Container** (Process Manager):
+- HTTP API for bot lifecycle (`worker/main.py`)
+- ProcessManager (spawns subprocesses directly)
+- Bot dependencies (NEAT, pandas, ta, duckdb)
+- Runs bot subprocesses internally
+- Shares network with API
+
+**Bot Subprocesses** (Inside Worker):
+- NEAT Swing Bot instances
+- Exchange adapters
+- IngestionOrchestrator per bot
 
 ## Directory Structure
 
