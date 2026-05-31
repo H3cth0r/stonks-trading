@@ -18,19 +18,17 @@ import signal
 import sys
 from typing import Any
 
-from stonks_trading.shared.ingest.binance import BinanceAdapter
-from stonks_trading.shared.ingest.orchestrator import IngestionOrchestrator
-from stonks_trading.shared.features.live_features import LiveFeatureComputer
-from stonks_trading.shared.scheduler import Scheduler
-from stonks_trading.shared.storage.duckdb_client import DuckDBClient
-
 from stonks_trading.bots import BotFactory, StrategyRegistry
 from stonks_trading.bots.neat_swing import create_neat_swing_strategy
 from stonks_trading.bots.neat_swing.state import NeatSwingState
 from stonks_trading.bots.startup import run_startup_recovery
-
 from stonks_trading.domains.trading.adapters import DryRunAdapter
 from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.features.live_features import LiveFeatureComputer
+from stonks_trading.shared.ingest.binance import BinanceAdapter
+from stonks_trading.shared.ingest.orchestrator import IngestionOrchestrator
+from stonks_trading.shared.scheduler import Scheduler
+from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 
 # Register NeatSwingStrategy factory (Phase 10C - strategy injection)
 StrategyRegistry.register("neat_swing", create_neat_swing_strategy)
@@ -207,7 +205,9 @@ async def run_bot(
     # Handle shutdown
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(bot, scheduler, orchestrator)))
+        loop.add_signal_handler(
+            sig, lambda: asyncio.create_task(shutdown(bot, scheduler, orchestrator))
+        )
 
     # Start heartbeat task
     heartbeat_task = asyncio.create_task(heartbeat_loop(bot))

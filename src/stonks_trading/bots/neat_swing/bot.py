@@ -13,10 +13,6 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from stonks_trading.shared.ingest.orchestrator import IngestionOrchestrator
-from stonks_trading.shared.logger import clear_bot_context, set_bot_context
-from stonks_trading.shared.metrics import MetricsExporter
-
 from stonks_trading.bots import BotRegistry
 from stonks_trading.bots.base.bot import BaseBot
 from stonks_trading.bots.neat_swing.scheduler_hook import get_scheduler_hook
@@ -25,7 +21,6 @@ from stonks_trading.bots.neat_swing.strategy import (
     MIN_TRADE_INTERVAL,
     NeatSwingStrategy,
 )
-
 from stonks_trading.domains.health.use_cases import RecordHeartbeatUseCase
 from stonks_trading.domains.trading.entities import Position
 from stonks_trading.domains.trading.enums import Side, TradingMode
@@ -39,6 +34,9 @@ from stonks_trading.domains.trading.repositories import (
 from stonks_trading.domains.trading.services import FeeCalculator, RiskChecker
 from stonks_trading.domains.trading.use_cases import ExecuteBotTradeUseCase
 from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.ingest.orchestrator import IngestionOrchestrator
+from stonks_trading.shared.logger import clear_bot_context, set_bot_context
+from stonks_trading.shared.metrics import MetricsExporter
 
 logger = logging.getLogger(__name__)
 
@@ -375,9 +373,7 @@ class NeatSwingBot(BaseBot[NeatSwingState, NeatSwingStrategy]):
 
         return self.strategy.determine_action(buy_prob, sell_prob, is_invested)
 
-    async def _execute_trade(
-        self, symbol: Symbol, side: Side, price: float
-    ) -> Any | None:
+    async def _execute_trade(self, symbol: Symbol, side: Side, price: float) -> Any | None:
         """Execute trade via use case.
 
         Args:

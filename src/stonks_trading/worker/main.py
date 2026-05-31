@@ -5,11 +5,8 @@ HTTP endpoints for the API to start/stop/manage bot subprocesses.
 """
 
 import asyncio
-import logging
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, status

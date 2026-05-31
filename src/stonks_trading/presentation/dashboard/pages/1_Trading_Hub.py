@@ -57,7 +57,9 @@ has_models = models_data and models_data.get("models") and len(models_data.get("
 bots_data = fetch_sync("/api/v1/bots")
 has_bots = bots_data and bots_data.get("bots") and len(bots_data.get("bots", [])) > 0
 training_jobs = fetch_sync("/api/v1/training")
-has_training = training_jobs and training_jobs.get("runs") and len(training_jobs.get("runs", [])) > 0
+has_training = (
+    training_jobs and training_jobs.get("runs") and len(training_jobs.get("runs", [])) > 0
+)
 
 # Stepper progress
 stepper_cols = st.columns(5)
@@ -80,7 +82,9 @@ for i, (stepper_col, (label, desc, completed)) in enumerate(zip(stepper_cols, st
 # Determine current step
 if not has_instruments:
     current_step = 1
-    st.warning("👆 **Step 1**: You need to register an instrument first! Go to the **Market Hub** page to add symbols.")
+    st.warning(
+        "👆 **Step 1**: You need to register an instrument first! Go to the **Market Hub** page to add symbols."
+    )
 elif not has_training:
     current_step = 2
     st.info("👆 **Step 2**: Start training a model. Go to the **Training** tab below.")
@@ -89,10 +93,14 @@ elif not has_models:
     st.info("👆 **Step 3**: Training complete! Activate your model in the **Models** tab.")
 elif not has_bots:
     current_step = 5
-    st.info("👆 **Step 5**: Deploy your bot! Go to the **Bot Control** tab to register and start trading.")
+    st.info(
+        "👆 **Step 5**: Deploy your bot! Go to the **Bot Control** tab to register and start trading."
+    )
 else:
     current_step = 5
-    st.success("✅ **Workflow Complete!** You have bots deployed. Monitor them in the Bot Control tab.")
+    st.success(
+        "✅ **Workflow Complete!** You have bots deployed. Monitor them in the Bot Control tab."
+    )
 
 st.markdown("---")
 
@@ -157,7 +165,11 @@ with tab_training:
 
         # Check if data exists for this symbol
         candles_data = fetch_sync(f"/api/v1/market/candles/{train_symbol}", {"limit": 10})
-        has_data = candles_data and candles_data.get("candles") and len(candles_data.get("candles", [])) > 0
+        has_data = (
+            candles_data
+            and candles_data.get("candles")
+            and len(candles_data.get("candles", [])) > 0
+        )
 
         if not has_data:
             st.warning(f"""
@@ -456,7 +468,9 @@ with tab_bot:
 
     # Check prerequisites
     active_model = fetch_sync("/api/v1/models/", {"is_active": "true"})
-    has_active_model = active_model and active_model.get("models") and len(active_model["models"]) > 0
+    has_active_model = (
+        active_model and active_model.get("models") and len(active_model["models"]) > 0
+    )
 
     if not has_active_model:
         st.error("""
@@ -479,12 +493,12 @@ with tab_bot:
     st.success(f"""
     ✅ **Step 5: Bot Deployment** 🚀
 
-    Active model ready: **{active_model['models'][0].get('id', 'Unknown')}**
+    Active model ready: **{active_model["models"][0].get("id", "Unknown")}**
 
     **Prerequisites Complete:**
     1. ✅ Register instrument (Market Hub)
     2. ✅ Train model (Training tab)
-    3. ✅ Activate model: {active_model['models'][0].get('symbol', 'Unknown')}
+    3. ✅ Activate model: {active_model["models"][0].get("symbol", "Unknown")}
     4. ✅ (Optional) Run backtest for validation (Analytics Hub)
 
     **Now you can:**
