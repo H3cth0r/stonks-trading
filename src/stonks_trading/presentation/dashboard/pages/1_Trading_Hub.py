@@ -71,7 +71,9 @@ step_config = [
     ("5️⃣ Deploy", "Register and start trading bot", has_bots),
 ]
 
-for i, (stepper_col, (label, desc, completed)) in enumerate(zip(stepper_cols, step_config), 1):
+for _, (stepper_col, (label, desc, completed)) in enumerate(
+    zip(stepper_cols, step_config, strict=True), 1
+):
     with stepper_col:
         if completed:
             st.success(f"**{label}** ✓")
@@ -224,7 +226,7 @@ with tab_training:
             else:
                 with st.spinner("Starting training job..."):
                     result = post_sync(
-                        "/api/v1/training/jobs",
+                        "/api/v1/training/async-training-jobs",
                         {
                             "symbol": train_symbol.upper() if train_symbol else "BTC_USD",
                             "generations": int(generations),
@@ -248,7 +250,7 @@ with tab_training:
             job_id = st.session_state.active_training_job
 
             # Fetch job status
-            job_data = fetch_sync(f"/api/v1/training/jobs/{job_id}")
+            job_data = fetch_sync(f"/api/v1/training/async-training-jobs/{job_id}")
 
             if job_data:
                 st.subheader(f"Training Job: {job_id[:8]}...")
@@ -303,6 +305,12 @@ with tab_training:
                         )
                         st.plotly_chart(fig, use_container_width=True)
 
+                    # Equity curve plot from training
+                    plot_data = fetch_sync(f"/api/v1/training/async-training-jobs/{job_id}/plot")
+                    if plot_data and plot_data.get("plot_html"):
+                        st.subheader("Equity Curve")
+                        st.components.v1.html(plot_data["plot_html"], height=450, scrolling=True)
+
                     # Checkpoint table with select buttons
                     for cp in checkpoints:
                         col_cp1, col_cp2, col_cp3, col_cp4 = st.columns([1, 1, 1, 1])
@@ -317,7 +325,7 @@ with tab_training:
                         with col_cp4:
                             if st.button("Select", key=f"select_{cp['generation']}"):
                                 result = post_sync(
-                                    f"/api/v1/training/jobs/{job_id}/select-checkpoint",
+                                    f"/api/v1/training/async-training-jobs/{job_id}/select-checkpoint",
                                     {"generation": cp["generation"]},
                                 )
                                 if result:
@@ -340,16 +348,36 @@ with tab_training:
         else:
             st.info("No active training job. Start one from the left panel!")
 
-    # Show training history
+    # Show training history from async jobs
     st.divider()
-    st.subheader("Training History")
+    st.subheader("Training History (Async Jobs)")
 
-    history_data = fetch_sync("/api/v1/training")
-    if history_data and history_data.get("runs"):
-        runs = history_data["runs"]
-        st.dataframe(pd.DataFrame(runs), use_container_width=True)
+    jobs_data = fetch_sync("/api/v1/training/async-training-jobs")
+    if jobs_data and jobs_data.get("jobs"):
+        jobs = jobs_data["jobs"]
+        st.dataframe(pd.DataFrame(jobs), use_container_width=True)
+
+        # Allow selecting a job to view its plot
+        if jobs:
+            st.subheader("View Job Plot")
+            job_options = [j["job_id"][:8] + "..." for j in jobs]
+            selected_idx = st.selectbox(
+                "Select Job", range(len(jobs)), format_func=lambda i: job_options[i]
+            )
+
+            if selected_idx is not None:
+                selected_job = jobs[selected_idx]
+                job_id = selected_job["job_id"]
+
+                # Fetch and display plot
+                plot_data = fetch_sync(f"/api/v1/training/async-training-jobs/{job_id}/plot")
+                if plot_data and plot_data.get("plot_html"):
+                    st.subheader(
+                        f"Equity Curve - Gen {selected_job.get('generations_completed', 0)}"
+                    )
+                    st.components.v1.html(plot_data["plot_html"], height=500, scrolling=True)
     else:
-        st.info("No historical training runs")
+        st.info("No training jobs yet. Start one from the left panel!")
 
 # =============================================================================
 # MODELS TAB - Step 3: Activate trained model
@@ -421,10 +449,47 @@ with tab_models:
     if models_data and models_data.get("models"):
         models = models_data["models"]
         df = pd.DataFrame(models)
-        st.dataframe(df, use_container_width=True)
 
-        # Model activation
-        st.subheader("Activate Model")
+        # Show generation in dataframe
+        display_cols = [
+            "id",
+            "generation",
+            "fitness_score",
+            "roi_validation",
+            "is_active",
+            "created_at",
+        ]
+        available_cols = [c for c in display_cols if c in df.columns]
+        st.dataframe(df[available_cols], use_container_width=True)
+
+        # Model detail view - select a model to see its plot
+        st.subheader("Inspect Model")
+        col_model1, col_model2 = st.columns([1, 3])
+        with col_model1:
+            selected_model_id = st.selectbox(
+                "Select Model ID", options=[m["id"] for m in models], key="inspect_model_id"
+            )
+        # Find selected model details
+        selected_model = next((m for m in models if m["id"] == selected_model_id), None)
+        if selected_model:
+            with col_model2:
+                st.json(
+                    {
+                        "id": selected_model.get("id"),
+                        "generation": selected_model.get("generation"),
+                        "fitness_score": selected_model.get("fitness_score"),
+                        "roi_validation": selected_model.get("roi_validation"),
+                        "total_return": selected_model.get("total_return"),
+                        "is_active": selected_model.get("is_active"),
+                        "created_at": selected_model.get("created_at"),
+                    }
+                )
+                # Note about viewing plots
+                st.info(
+                    "💡 To view equity curves, go to the **Training** tab and select the job that created this model."
+                )
+
+        st.divider()
         col1, col2, col3 = st.columns(3)
         with col1:
             model_id = st.number_input("Model ID", min_value=1, step=1, key="model_id_input")

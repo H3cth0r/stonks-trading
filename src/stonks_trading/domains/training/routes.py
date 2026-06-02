@@ -4,17 +4,20 @@ API layer - NOT imported by the bot container.
 These routes provide HTTP access to training domain functionality.
 """
 
+import pickle
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import Path as FastAPIPath
 
+from stonks_trading.domains.strategies.neat_swing.config import create_default_config
+from stonks_trading.domains.trading.entities import Genome
+from stonks_trading.domains.trading.repositories import save_genome
 from stonks_trading.domains.trading.value_objects import BotContext, Symbol
 from stonks_trading.domains.training import use_cases as training_use_cases
-from stonks_trading.domains.training.async_executor import get_training_executor
 from stonks_trading.domains.training.dtos import (
     CheckpointCleanupResponse,
-    GenerationMetricListResponse,
     GenomeComparisonResponse,
     RetrainingJobRequest,
     RetrainingJobResponse,
@@ -31,26 +34,21 @@ from stonks_trading.domains.training.dtos import (
     TrainingJobResponse,
     TrainingPlotResponse,
     TrainingProgressPlotResponse,
-    TrainingProgressResponse,
     TrainingRunListResponse,
     TrainingRunRequest,
-    TrainingRunResponse,
     TriggerRetrainingRequest,
     TriggerRetrainingResponse,
 )
 from stonks_trading.domains.training.entities import RetrainingJob
 from stonks_trading.domains.training.mappers import (
-    GenerationMetricMapper,
     GenomeComparisonMapper,
     RetrainingJobMapper,
     SchedulerJobMapper,
-    TrainingProgressMapper,
     TrainingRunMapper,
     TriggerRetrainingMapper,
 )
+from stonks_trading.domains.training.real_executor import get_real_training_executor
 from stonks_trading.domains.training.repositories import (
-    get_training_run,
-    list_generation_metrics,
     list_training_runs,
 )
 from stonks_trading.domains.training.scheduler_integration import (
@@ -63,6 +61,7 @@ from stonks_trading.domains.training.services import (
     TrainingDataProvider,
     TrainingExecutor,
 )
+from stonks_trading.shared.logger import logger
 
 # Create router
 router = APIRouter(prefix="/training", tags=["training"])
@@ -175,53 +174,57 @@ async def create_training_run_endpoint(
         ) from None
 
 
-@router.get(
-    "/{run_id}",
-    response_model=TrainingRunResponse,
-)
-async def get_training_run_endpoint(
-    run_id: int = Path(..., ge=1),
-) -> TrainingRunResponse:
-    """Get a specific training run by ID."""
-    run = await get_training_run(run_id)
-    if not run:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Training run {run_id} not found",
-        )
-    return TrainingRunMapper.to_response(run)
-
-
-@router.get(
-    "/{run_id}/progress",
-    response_model=TrainingProgressResponse,
-)
-async def get_training_progress_endpoint(
-    run_id: int = Path(..., ge=1),
-) -> TrainingProgressResponse:
-    """Get current training progress for a run."""
-    use_case = training_use_cases.GetTrainingProgressUseCase()
-    session = await use_case.execute(run_id)
-
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Training run {run_id} not found",
-        )
-    return TrainingProgressMapper.to_response(session)
-
-
-@router.get(
-    "/{run_id}/metrics",
-    response_model=GenerationMetricListResponse,
-)
-async def get_generation_metrics_endpoint(
-    run_id: int = Path(..., ge=1),
-) -> GenerationMetricListResponse:
-    """Get generation metrics for a training run."""
-    metrics = await list_generation_metrics(run_id)
-    metric_responses = GenerationMetricMapper.to_response_list(metrics)
-    return GenerationMetricListResponse(metrics=metric_responses, total=len(metric_responses))
+# DISABLED: /{run_id}, /{run_id}/progress, /{run_id}/metrics routes
+# These conflicted with /async-training-jobs patterns
+# @router.get(
+#     "/{run_id}",
+#     response_model=TrainingRunResponse,
+# )
+# async def get_training_run_endpoint(
+#     run_id: int = FastAPIPath(..., ge=1),
+# ) -> TrainingRunResponse:
+#     """Get a specific training run by ID."""
+#     run = await get_training_run(run_id)
+#     if not run:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND,
+#             detail=f"Training run {run_id} not found",
+#         )
+#     return TrainingRunMapper.to_response(run)
+#
+#
+# # DISABLED: conflicts with /async-training-jobs/{job_id}
+# # @router.get(
+# #     "/{run_id}/progress",
+# #     response_model=TrainingProgressResponse,
+# # )
+# # async def get_training_progress_endpoint(
+# #     run_id: int = FastAPIPath(..., ge=1),
+# # ) -> TrainingRunResponse:
+# #     """Get current training progress for a run."""
+# #     use_case = training_use_cases.GetTrainingProgressUseCase()
+# #     session = await use_case.execute(run_id)
+# #
+# #     if not session:
+# #         raise HTTPException(
+# #             status_code=status.HTTP_404_NOT_FOUND,
+# #             detail=f"Training run {run_id} not found",
+# #         )
+# #     return TrainingProgressMapper.to_response(session)
+#
+#
+# # DISABLED: conflicts with /async-training-jobs/{job_id}
+# # @router.get(
+# #     "/{run_id}/metrics",
+# #     response_model=GenerationMetricListResponse,
+# # )
+# # async def get_generation_metrics_endpoint(
+# #     run_id: int = FastAPIPath(..., ge=1),
+# # ) -> GenerationMetricListResponse:
+# #     """Get generation metrics for a training run."""
+# #     metrics = await list_generation_metrics(run_id)
+# #     metric_responses = GenerationMetricMapper.to_response_list(metrics)
+# #     return GenerationMetricListResponse(metrics=metric_responses, total=len(metric_responses))
 
 
 # =============================================================================
@@ -301,7 +304,7 @@ async def trigger_daily_retraining_endpoint() -> RetrainingSummaryResponse:
     response_model=CheckpointCleanupResponse,
 )
 async def cleanup_checkpoints_endpoint(
-    run_id: int = Path(..., ge=1),
+    run_id: int = FastAPIPath(..., ge=1),
     keep_every_nth: int = Query(default=5, ge=1, le=50),
     max_checkpoints: int = Query(default=20, ge=1, le=100),
 ) -> CheckpointCleanupResponse:
@@ -398,7 +401,7 @@ async def list_scheduler_jobs_endpoint() -> SchedulerJobListResponse:
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_scheduler_job_endpoint(
-    job_id: str = Path(..., min_length=1),
+    job_id: str = FastAPIPath(..., min_length=1),
 ) -> None:
     """Remove a scheduled retraining job."""
     scheduler = get_training_scheduler()
@@ -488,7 +491,7 @@ async def stop_scheduler_endpoint() -> dict[str, str]:
 
 
 @router.post(
-    "/jobs",
+    "/async-training-jobs",
     response_model=TrainingJobResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -498,9 +501,9 @@ async def start_training_job_endpoint(
     """Start an async training job.
 
     Returns immediately with job_id. Training runs in background.
-    Poll GET /training/jobs/{job_id} for progress.
+    Poll GET /training/async-training-jobs/{job_id} for progress.
     """
-    executor = get_training_executor()
+    executor = get_real_training_executor()
 
     job_id = await executor.start_job(
         symbol=request.symbol,
@@ -523,34 +526,63 @@ async def start_training_job_endpoint(
 
 
 @router.get(
-    "/jobs",
+    "/async-training-jobs",
     response_model=TrainingJobListResponse,
 )
 async def list_training_jobs_endpoint(
     status: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
 ) -> TrainingJobListResponse:
-    """List all training jobs.
+    """List all training jobs from Redis.
 
     Returns jobs from Redis cache. Jobs expire after 7 days.
     """
-    # TODO: Implement job listing from Redis pattern scan
-    # For now, return empty list
-    return TrainingJobListResponse(jobs=[], total=0)
+    import json
+
+    import redis as redis_client
+
+    from stonks_trading.shared.config import settings
+
+    r = redis_client.Redis.from_url(settings.redis_url)
+    job_keys = []
+    for key in r.scan_iter("training:job:*", count=1000):
+        job_keys.append(key)
+
+    jobs = []
+    for key in job_keys[:limit]:
+        data = r.get(key)
+        if data:
+            job_data = json.loads(data)
+            if status is None or job_data.get("status") == status:
+                jobs.append(
+                    {
+                        "job_id": job_data.get("id"),
+                        "symbol": job_data.get("symbol"),
+                        "status": job_data.get("status"),
+                        "generations_total": job_data.get("generations_total"),
+                        "generations_completed": job_data.get("generations_completed"),
+                        "best_fitness": job_data.get("best_fitness"),
+                        "progress_pct": job_data.get("progress_pct"),
+                        "started_at": job_data.get("started_at"),
+                        "checkpoints": job_data.get("checkpoints", []),
+                    }
+                )
+
+    return TrainingJobListResponse(jobs=jobs, total=len(jobs))
 
 
 @router.get(
-    "/jobs/{job_id}",
+    "/async-training-jobs/{job_id}",
     response_model=TrainingJobDetailResponse,
 )
 async def get_training_job_endpoint(
-    job_id: str = Path(..., min_length=1),
+    job_id: str = FastAPIPath(..., min_length=1),
 ) -> TrainingJobDetailResponse:
     """Get training job status and progress.
 
     Returns current generation, fitness, checkpoints, and plot data.
     """
-    executor = get_training_executor()
+    executor = get_real_training_executor()
     job_data = await executor.get_job_status(job_id)
 
     if not job_data:
@@ -563,10 +595,12 @@ async def get_training_job_endpoint(
     checkpoints = [
         TrainingCheckpointResponse(
             generation=c["generation"],
-            model_id=c["model_id"],
+            model_id=c.get("model_id", f"{job_id}_{c['generation']}"),
             fitness=c["fitness"],
             roi=c.get("roi"),
-            created_at=datetime.fromisoformat(c["created_at"]),
+            created_at=datetime.fromisoformat(c["created_at"])
+            if c.get("created_at")
+            else datetime.utcnow(),
         )
         for c in job_data.get("checkpoints", [])
     ]
@@ -588,17 +622,17 @@ async def get_training_job_endpoint(
 
 
 @router.get(
-    "/jobs/{job_id}/checkpoints",
+    "/async-training-jobs/{job_id}/checkpoints",
     response_model=list[TrainingCheckpointResponse],
 )
 async def list_training_checkpoints_endpoint(
-    job_id: str = Path(..., min_length=1),
+    job_id: str = FastAPIPath(..., min_length=1),
 ) -> list[TrainingCheckpointResponse]:
     """List all checkpoints for a training job.
 
     Checkpoints are saved every N generations.
     """
-    executor = get_training_executor()
+    executor = get_real_training_executor()
     checkpoints = await executor.get_checkpoints(job_id)
 
     return [
@@ -614,27 +648,77 @@ async def list_training_checkpoints_endpoint(
 
 
 @router.post(
-    "/jobs/{job_id}/select-checkpoint",
+    "/async-training-jobs/{job_id}/select-checkpoint",
     response_model=SelectCheckpointResponse,
 )
 async def select_checkpoint_endpoint(
     request: SelectCheckpointRequest,
-    job_id: str = Path(..., min_length=1),
+    job_id: str = FastAPIPath(..., min_length=1),
 ) -> SelectCheckpointResponse:
-    """Select a checkpoint for deployment.
+    """Select a checkpoint and save it as a model in the database.
 
-    Activates the checkpoint genome for use in live trading.
+    This makes the checkpoint available in /api/v1/models/
     """
-    executor = get_training_executor()
-    result = await executor.select_checkpoint(job_id, request.generation)
+    executor = get_real_training_executor()
 
-    if not result:
+    # Load checkpoint data
+    checkpoint_data = await executor.select_checkpoint(job_id, request.generation)
+
+    if not checkpoint_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Checkpoint gen {request.generation} not found for job {job_id}",
         )
 
-    return SelectCheckpointResponse(**result)
+    # Get checkpoint metadata from job state
+    job_data = await executor.get_job_status(job_id)
+    checkpoints = job_data.get("checkpoints", []) if job_data else []
+    checkpoint_meta = next(
+        (c for c in checkpoints if c["generation"] == request.generation),
+        None,
+    )
+
+    # Create Genome entity
+    genome = checkpoint_data["genome"]
+    config = create_default_config()
+    genome_bytes = pickle.dumps((genome, config))
+
+    symbol = checkpoint_data.get("symbol", "BTC_USD")
+
+    genome_entity = Genome(
+        genome_data=genome_bytes,
+        fitness=genome.fitness or 0.0,
+        generation=request.generation,
+        symbol=Symbol(value=symbol),
+        roi_validation=(
+            checkpoint_meta.get("roi", 0) if checkpoint_meta else checkpoint_data.get("roi", 0)
+        ),
+        total_return=(checkpoint_data.get("roi", 0) / 100)
+        if checkpoint_data.get("roi", 0)
+        else 0.0,
+        is_active=False,
+        model_family="NEAT_RNN_V1",
+        trained_at=datetime.utcnow(),
+        notes=f"Checkpoint from training job {job_id}, generation {request.generation}",
+    )
+
+    # Save to database
+    saved = await save_genome(genome_entity)
+
+    logger.info(
+        "Checkpoint selected and saved as model",
+        job_id=job_id,
+        generation=request.generation,
+        model_id=saved.id,
+    )
+
+    return SelectCheckpointResponse(
+        job_id=job_id,
+        generation=request.generation,
+        model_id=str(saved.id),
+        activated=True,
+        message=f"Checkpoint gen {request.generation} saved as model {saved.id}",
+    )
 
 
 # =============================================================================
@@ -643,17 +727,18 @@ async def select_checkpoint_endpoint(
 
 
 @router.get(
-    "/jobs/{job_id}/plot",
+    "/async-training-jobs/{job_id}/plot",
     response_model=TrainingPlotResponse,
 )
 async def get_training_plot_endpoint(
-    job_id: str = Path(..., min_length=1),
+    job_id: str = FastAPIPath(..., min_length=1),
 ) -> TrainingPlotResponse:
-    """Get current training plot with fitness curve.
+    """Get training plot with fitness curve and equity curve.
 
     Returns Plotly HTML for the current training progress.
+    Uses the most recent checkpoint's equity curve if available.
     """
-    executor = get_training_executor()
+    executor = get_real_training_executor()
     job_data = await executor.get_job_status(job_id)
 
     if not job_data:
@@ -662,9 +747,20 @@ async def get_training_plot_endpoint(
             detail=f"Training job {job_id} not found",
         )
 
-    # Generate fitness curve plot from checkpoints
+    # Get checkpoints
     checkpoints = job_data.get("checkpoints", [])
-    plot_html = _generate_fitness_plot_html(checkpoints, job_data.get("symbol", ""))
+
+    # Try to get equity curve from stored plot_html in last checkpoint
+    if checkpoints:
+        last_checkpoint = checkpoints[-1]
+        stored_plot = last_checkpoint.get("plot_html", "")
+        if stored_plot:
+            plot_html = stored_plot
+        else:
+            plot_html = _generate_checkpoint_plot_html(last_checkpoint, job_data.get("symbol", ""))
+    else:
+        # Fallback to simple fitness plot
+        plot_html = _generate_fitness_plot_html(checkpoints, job_data.get("symbol", ""))
 
     return TrainingPlotResponse(
         job_id=job_id,
@@ -676,18 +772,18 @@ async def get_training_plot_endpoint(
 
 
 @router.get(
-    "/jobs/{job_id}/checkpoints/{generation}/plot",
+    "/async-training-jobs/{job_id}/checkpoints/{generation}/plot",
     response_model=TrainingPlotResponse,
 )
 async def get_checkpoint_plot_endpoint(
-    job_id: str = Path(..., min_length=1),
-    generation: int = Path(..., ge=1),
+    job_id: str = FastAPIPath(..., min_length=1),
+    generation: int = FastAPIPath(..., ge=1),
 ) -> TrainingPlotResponse:
     """Get plot for a specific checkpoint.
 
     Shows the equity curve at that specific generation.
     """
-    executor = get_training_executor()
+    executor = get_real_training_executor()
     job_data = await executor.get_job_status(job_id)
 
     if not job_data:
@@ -718,17 +814,17 @@ async def get_checkpoint_plot_endpoint(
 
 
 @router.get(
-    "/jobs/{job_id}/progress-plot",
+    "/async-training-jobs/{job_id}/progress-plot",
     response_model=TrainingProgressPlotResponse,
 )
 async def get_training_progress_plot_endpoint(
-    job_id: str = Path(..., min_length=1),
+    job_id: str = FastAPIPath(..., min_length=1),
 ) -> TrainingProgressPlotResponse:
     """Get training progress data for live plotting.
 
     Returns structured data for client-side Plotly rendering.
     """
-    executor = get_training_executor()
+    executor = get_real_training_executor()
     job_data = await executor.get_job_status(job_id)
 
     if not job_data:

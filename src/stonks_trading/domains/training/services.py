@@ -29,6 +29,7 @@ from stonks_trading.domains.strategies.neat_swing.trainer import (
     evaluate_genome_on_data,
 )
 from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.logger import logger
 from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 
 
@@ -285,6 +286,63 @@ class TrainingDataProvider:
         start_date = end_date - timedelta(days=days)
 
         return await self._fetch_data(symbol, start_date, end_date, "validation")
+
+    async def fetch_all_available_data(
+        self,
+        symbol: str,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Fetch ALL available data with 80/20 train/test split.
+
+        Mimics NEAT/main.py load_data() behavior:
+        - Uses entire available dataset from DuckDB
+        - Splits 80% train, 20% test
+        - Returns both train and test DataFrames
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Tuple of (train_df, test_df)
+        """
+        self._db_client.connect()
+
+        try:
+            symbol_vo = Symbol(value=symbol)
+
+            # Get ALL data (not just last 30 days)
+            # Use a very early start date to get all available data
+            start_date = datetime(2020, 1, 1)
+            end_date = datetime.utcnow()
+
+            raw_data = self._db_client.get_data_range(
+                symbol=symbol_vo,
+                start=start_date,
+                end=end_date,
+            )
+
+            if not raw_data:
+                raise ValueError(f"No data found for {symbol}")
+
+            df = self._to_dataframe(raw_data)
+            df = self._ensure_features(df)
+
+            # 80/20 split like NEAT/main.py line 90-91
+            split_idx = int(len(df) * 0.8)
+            train_df = df.iloc[:split_idx]
+            test_df = df.iloc[split_idx:]
+
+            logger.info(
+                "Loaded training data",
+                symbol=symbol,
+                total_rows=len(df),
+                train_rows=len(train_df),
+                test_rows=len(test_df),
+            )
+
+            return train_df, test_df
+
+        finally:
+            self._db_client.close()
 
     async def _fetch_data(
         self,

@@ -245,7 +245,7 @@ class TrainingJobListResponse(BaseResponse):
 class SelectCheckpointRequest(BaseModel):
     """Request to select checkpoint for deployment."""
 
-    generation: int = Field(..., ge=1)
+    generation: int = Field(..., ge=0)
 
 
 class SelectCheckpointResponse(BaseResponse):

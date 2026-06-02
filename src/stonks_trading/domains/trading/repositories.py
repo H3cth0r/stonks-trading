@@ -393,7 +393,7 @@ def _model_to_genome(model: GenomeModel) -> Genome:
         id=model.id,
         genome_data=model.genome_data or b"",
         fitness=model.fitness_score or model.fitness,  # type: ignore[attr-defined]
-        generation=0,
+        generation=getattr(model, "generation", 0) or 0,
         symbol=Symbol(value=model.symbol) if model.symbol else None,
         model_family=model.model_family,
         artifact_uri=model.artifact_uri,

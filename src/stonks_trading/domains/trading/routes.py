@@ -1053,7 +1053,6 @@ def get_trading_router() -> APIRouter:
     # Phase 6 routes
     router.include_router(activity_router)
     router.include_router(orders_router)
-    router.include_router(training_router)
     # Phase 10B - Backfill routes
     router.include_router(backfill_router)
 
