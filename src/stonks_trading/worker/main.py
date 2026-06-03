@@ -5,8 +5,12 @@ HTTP endpoints for the API to start/stop/manage bot subprocesses.
 """
 
 import asyncio
+import json
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
@@ -22,6 +26,7 @@ from stonks_trading.domains.botcontrol.mappers import BotProcessMapper
 from stonks_trading.domains.trading.value_objects import BotContext
 from stonks_trading.shared.config import settings
 from stonks_trading.shared.logger import logger
+from stonks_trading.shared.redis_client import get_redis
 
 
 class WorkerProcessManager:
@@ -34,6 +39,7 @@ class WorkerProcessManager:
     def __init__(self):
         """Initialize WorkerProcessManager."""
         self._processes: dict[str, asyncio.subprocess.Process] = {}
+        self._training_processes: dict[str, asyncio.subprocess.Process] = {}
         logger.info("WorkerProcessManager initialized")
 
     async def start_bot(
@@ -266,6 +272,220 @@ def get_worker_router() -> APIRouter:
     async def health_check():
         """Health check endpoint."""
         return {"status": "ok", "service": "bot-worker"}
+
+    # Training job routes
+    @router.post("/training/jobs")
+    async def worker_start_training(request: dict[str, Any]) -> dict[str, Any]:
+        """Start training subprocess in Worker.
+
+        Called by API container via HTTP.
+        Spawns training subprocess and tracks it.
+        """
+        job_id = str(uuid.uuid4())
+        checkpoint_dir = Path(f"/app/data/training/{job_id}")
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            "python",
+            "-m",
+            "stonks_trading.worker.training_subprocess",
+            "--job-id",
+            job_id,
+            "--symbol",
+            request["symbol"],
+            "--generations",
+            str(request["generations"]),
+            "--population-size",
+            str(request["population_size"]),
+            "--training-capital",
+            str(request["training_capital"]),
+            "--checkpoint-interval",
+            str(request["checkpoint_interval"]),
+            "--checkpoint-dir",
+            str(checkpoint_dir),
+            "--strategy-type",
+            request.get("strategy_type", "neat_swing"),
+        ]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            worker_process_manager._training_processes[job_id] = process
+
+            job_data = {
+                "id": job_id,
+                "symbol": request["symbol"],
+                "status": "running",
+                "generations_total": request["generations"],
+                "generations_completed": 0,
+                "best_fitness": None,
+                "best_roi": None,
+                "progress_pct": 0.0,
+                "checkpoints": [],
+                "checkpoint_dir": str(checkpoint_dir),
+                "started_at": datetime.utcnow().isoformat(),
+                "error": None,
+            }
+
+            redis = await get_redis()
+            await redis.setex(
+                f"training:job:{job_id}",
+                86400 * 30,
+                json.dumps(job_data),
+            )
+
+            logger.info(f"[WORKER] Started training subprocess {job_id} with PID {process.pid}")
+
+            return {
+                "job_id": job_id,
+                "status": "running",
+                "started_at": job_data["started_at"],
+            }
+
+        except Exception as e:
+            logger.error(f"[WORKER] Failed to start training: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to start training: {str(e)}",
+            ) from e
+
+    @router.get("/training/jobs/{job_id}")
+    async def worker_get_training_status(job_id: str) -> dict[str, Any]:
+        """Get training job status from Redis."""
+        redis = await get_redis()
+        data = await redis.get(f"training:job:{job_id}")
+
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Training job {job_id} not found",
+            )
+
+        if isinstance(data, bytes):
+            data = data.decode("utf-8")
+
+        return json.loads(data)
+
+    @router.post("/training/jobs/{job_id}/stop")
+    async def worker_stop_training(
+        job_id: str,
+        graceful: bool = True,
+    ) -> dict[str, Any]:
+        """Stop training subprocess."""
+        if job_id not in worker_process_manager._training_processes:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Training job {job_id} not found",
+            )
+
+        process = worker_process_manager._training_processes[job_id]
+
+        if graceful:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=30.0)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+        else:
+            process.kill()
+            await process.wait()
+
+        del worker_process_manager._training_processes[job_id]
+
+        redis = await get_redis()
+        data = await redis.get(f"training:job:{job_id}")
+        if data:
+            if isinstance(data, bytes):
+                data = data.decode("utf-8")
+            job_data = json.loads(data)
+            job_data["status"] = "stopped"
+            await redis.setex(
+                f"training:job:{job_id}",
+                86400 * 30,
+                json.dumps(job_data),
+            )
+
+        return {"job_id": job_id, "status": "stopped"}
+
+    @router.get("/training/jobs/{job_id}/checkpoints/{generation}/plot")
+    async def worker_get_checkpoint_plot(job_id: str, generation: int) -> dict[str, Any]:
+        """Get checkpoint plot HTML."""
+        plot_file = Path(f"/app/data/training/{job_id}/gen_{generation}_plot.html")
+
+        if not plot_file.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Plot for generation {generation} not found",
+            )
+
+        plot_html = plot_file.read_text()
+        return {"plot_html": plot_html}
+
+    @router.get("/training/jobs/{job_id}/checkpoints")
+    async def worker_list_checkpoints(job_id: str) -> dict[str, Any]:
+        """List all checkpoints for a training job."""
+        redis = await get_redis()
+        data = await redis.get(f"training:job:{job_id}")
+
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Training job {job_id} not found",
+            )
+
+        if isinstance(data, bytes):
+            data = data.decode("utf-8")
+
+        job_data = json.loads(data)
+        checkpoints = job_data.get("checkpoints", [])
+
+        return {"checkpoints": checkpoints, "count": len(checkpoints)}
+
+    @router.get("/training/jobs/{job_id}/checkpoints/{generation}")
+    async def worker_get_checkpoint(job_id: str, generation: int) -> dict[str, Any]:
+        """Get checkpoint genome data."""
+        checkpoint_dir = Path(f"/app/data/training/{job_id}")
+        genome_file = checkpoint_dir / f"gen_{generation}.pkl"
+
+        if not genome_file.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Checkpoint generation {generation} not found",
+            )
+
+        # Load checkpoint metadata from Redis
+        redis = await get_redis()
+        data = await redis.get(f"training:job:{job_id}")
+
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Training job {job_id} not found",
+            )
+
+        if isinstance(data, bytes):
+            data = data.decode("utf-8")
+
+        job_data = json.loads(data)
+        checkpoints = job_data.get("checkpoints", [])
+        checkpoint_meta = next(
+            (c for c in checkpoints if c["generation"] == generation),
+            None,
+        )
+
+        return {
+            "job_id": job_id,
+            "generation": generation,
+            "fitness": checkpoint_meta.get("fitness") if checkpoint_meta else None,
+            "roi": checkpoint_meta.get("roi") if checkpoint_meta else None,
+            "created_at": checkpoint_meta.get("created_at") if checkpoint_meta else None,
+            "genome_path": str(genome_file),
+        }
 
     return router
 

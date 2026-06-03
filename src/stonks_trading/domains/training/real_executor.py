@@ -1,6 +1,14 @@
 """Real training executor that actually runs NEAT.
 
-Replaces async_executor.py simulation with actual NEAT training.
+DEPRECATED: Training now runs in Worker container.
+Use TrainingProcessManager from services.py instead.
+
+This module is kept for reference during migration. Will be removed in future release.
+
+Migration:
+    BEFORE: from real_executor import get_real_training_executor
+    AFTER:  from training.services import get_training_process_manager
+
 Phase 10D: Complete NEAT training implementation with full data, checkpoints & plots.
 
 This module provides:
@@ -12,6 +20,7 @@ import asyncio
 import json
 import pickle
 import uuid
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +39,12 @@ from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.domains.training.services import TrainingDataProvider
 from stonks_trading.shared.logger import logger
 from stonks_trading.shared.redis_client import get_redis
+
+warnings.warn(
+    "real_executor is deprecated. Use training_manager with Worker delegation.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 @dataclass

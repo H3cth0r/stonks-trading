@@ -11,7 +11,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi import Path as FastAPIPath
 
-from stonks_trading.domains.strategies.neat_swing.config import create_default_config
 from stonks_trading.domains.trading.entities import Genome
 from stonks_trading.domains.trading.repositories import save_genome
 from stonks_trading.domains.trading.value_objects import BotContext, Symbol
@@ -32,6 +31,7 @@ from stonks_trading.domains.training.dtos import (
     TrainingJobListResponse,
     TrainingJobRequest,
     TrainingJobResponse,
+    TrainingJobStopResponse,
     TrainingPlotResponse,
     TrainingProgressPlotResponse,
     TrainingRunListResponse,
@@ -47,7 +47,6 @@ from stonks_trading.domains.training.mappers import (
     TrainingRunMapper,
     TriggerRetrainingMapper,
 )
-from stonks_trading.domains.training.real_executor import get_real_training_executor
 from stonks_trading.domains.training.repositories import (
     list_training_runs,
 )
@@ -60,6 +59,7 @@ from stonks_trading.domains.training.services import (
     GenomeEvaluator,
     TrainingDataProvider,
     TrainingExecutor,
+    get_training_process_manager,
 )
 from stonks_trading.shared.logger import logger
 
@@ -503,9 +503,9 @@ async def start_training_job_endpoint(
     Returns immediately with job_id. Training runs in background.
     Poll GET /training/async-training-jobs/{job_id} for progress.
     """
-    executor = get_real_training_executor()
+    manager = get_training_process_manager()
 
-    job_id = await executor.start_job(
+    job = await manager.start_training(
         symbol=request.symbol,
         generations=request.generations,
         population_size=request.population_size,
@@ -515,13 +515,13 @@ async def start_training_job_endpoint(
     )
 
     return TrainingJobResponse(
-        job_id=job_id,
-        symbol=request.symbol,
-        status="queued",
-        generations_total=request.generations,
+        job_id=job.job_id,
+        symbol=job.symbol,
+        status=job.status,
+        generations_total=job.generations_total,
         generations_completed=0,
         progress_pct=0.0,
-        started_at=datetime.utcnow(),
+        started_at=job.started_at or datetime.utcnow(),
     )
 
 
@@ -582,8 +582,8 @@ async def get_training_job_endpoint(
 
     Returns current generation, fitness, checkpoints, and plot data.
     """
-    executor = get_real_training_executor()
-    job_data = await executor.get_job_status(job_id)
+    manager = get_training_process_manager()
+    job_data = await manager.get_job_status(job_id)
 
     if not job_data:
         raise HTTPException(
@@ -602,22 +602,20 @@ async def get_training_job_endpoint(
             if c.get("created_at")
             else datetime.utcnow(),
         )
-        for c in job_data.get("checkpoints", [])
+        for c in job_data.checkpoints or []
     ]
 
     return TrainingJobDetailResponse(
-        job_id=job_data["id"],
-        symbol=job_data["symbol"],
-        status=job_data["status"],
-        generations_total=job_data["generations_total"],
-        generations_completed=job_data.get("generations_completed", 0),
-        best_fitness=job_data.get("best_fitness"),
-        progress_pct=job_data.get("progress_pct", 0.0),
-        started_at=(
-            datetime.fromisoformat(job_data["started_at"]) if job_data.get("started_at") else None
-        ),
+        job_id=job_data.job_id,
+        symbol=job_data.symbol,
+        status=job_data.status,
+        generations_total=job_data.generations_total,
+        generations_completed=job_data.generations_completed,
+        best_fitness=job_data.best_fitness,
+        progress_pct=job_data.progress_pct,
+        started_at=job_data.started_at,
         checkpoints=checkpoints,
-        current_plot=None,  # TODO: Add plot generation
+        current_plot=None,
     )
 
 
@@ -632,16 +630,18 @@ async def list_training_checkpoints_endpoint(
 
     Checkpoints are saved every N generations.
     """
-    executor = get_real_training_executor()
-    checkpoints = await executor.get_checkpoints(job_id)
+    manager = get_training_process_manager()
+    checkpoints = await manager.list_checkpoints(job_id)
 
     return [
         TrainingCheckpointResponse(
             generation=c["generation"],
-            model_id=c["model_id"],
+            model_id=f"{job_id}_{c['generation']}",
             fitness=c["fitness"],
             roi=c.get("roi"),
-            created_at=datetime.fromisoformat(c["created_at"]),
+            created_at=datetime.fromisoformat(c["created_at"])
+            if c.get("created_at")
+            else datetime.utcnow(),
         )
         for c in checkpoints
     ]
@@ -659,10 +659,10 @@ async def select_checkpoint_endpoint(
 
     This makes the checkpoint available in /api/v1/models/
     """
-    executor = get_real_training_executor()
+    manager = get_training_process_manager()
 
-    # Load checkpoint data
-    checkpoint_data = await executor.select_checkpoint(job_id, request.generation)
+    # Get checkpoint data from Worker
+    checkpoint_data = await manager.get_checkpoint(job_id, request.generation)
 
     if not checkpoint_data:
         raise HTTPException(
@@ -670,32 +670,51 @@ async def select_checkpoint_endpoint(
             detail=f"Checkpoint gen {request.generation} not found for job {job_id}",
         )
 
-    # Get checkpoint metadata from job state
-    job_data = await executor.get_job_status(job_id)
-    checkpoints = job_data.get("checkpoints", []) if job_data else []
+    # Get job status for symbol and checkpoint metadata
+    job_status = await manager.get_job_status(job_id)
+    if not job_status:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found",
+        )
+
+    checkpoints = job_status.checkpoints or []
     checkpoint_meta = next(
         (c for c in checkpoints if c["generation"] == request.generation),
         None,
     )
 
-    # Create Genome entity
-    genome = checkpoint_data["genome"]
-    config = create_default_config()
-    genome_bytes = pickle.dumps((genome, config))
+    # Load genome from pickle file
+    from pathlib import Path
 
-    symbol = checkpoint_data.get("symbol", "BTC_USD")
+    genome_path = checkpoint_data.get("genome_path")
+    if not genome_path:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Genome path not available",
+        )
+
+    genome_file = Path(genome_path)
+    if not genome_file.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Genome file not found: {genome_path}",
+        )
+
+    with open(genome_file, "rb") as f:
+        genome, config = pickle.load(f)
+
+    genome_bytes = pickle.dumps((genome, config))
+    symbol = job_status.symbol or "BTC_USD"
 
     genome_entity = Genome(
         genome_data=genome_bytes,
-        fitness=genome.fitness or 0.0,
+        fitness=checkpoint_data.get("fitness", 0) or 0.0,
         generation=request.generation,
         symbol=Symbol(value=symbol),
-        roi_validation=(
-            checkpoint_meta.get("roi", 0) if checkpoint_meta else checkpoint_data.get("roi", 0)
-        ),
-        total_return=(checkpoint_data.get("roi", 0) / 100)
-        if checkpoint_data.get("roi", 0)
-        else 0.0,
+        roi_validation=checkpoint_data.get("roi", 0)
+        or (checkpoint_meta.get("roi", 0) if checkpoint_meta else 0),
+        total_return=(checkpoint_data.get("roi", 0) or 0) / 100,
         is_active=False,
         model_family="NEAT_RNN_V1",
         trained_at=datetime.utcnow(),
@@ -721,6 +740,34 @@ async def select_checkpoint_endpoint(
     )
 
 
+@router.post(
+    "/async-training-jobs/{job_id}/stop",
+    response_model=TrainingJobStopResponse,
+)
+async def stop_training_job_endpoint(
+    job_id: str = FastAPIPath(..., min_length=1),
+    graceful: bool = True,
+) -> TrainingJobStopResponse:
+    """Stop a running training job.
+
+    Sends stop signal to the Worker subprocess and updates job status.
+    """
+    manager = get_training_process_manager()
+    success = await manager.stop_training(job_id, graceful=graceful)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found or already stopped",
+        )
+
+    return TrainingJobStopResponse(
+        job_id=job_id,
+        status="stopped",
+        message=f"Training job {job_id} has been stopped",
+    )
+
+
 # =============================================================================
 # Training Plot Endpoints (Phase 3)
 # =============================================================================
@@ -738,8 +785,8 @@ async def get_training_plot_endpoint(
     Returns Plotly HTML for the current training progress.
     Uses the most recent checkpoint's equity curve if available.
     """
-    executor = get_real_training_executor()
-    job_data = await executor.get_job_status(job_id)
+    manager = get_training_process_manager()
+    job_data = await manager.get_job_status(job_id)
 
     if not job_data:
         raise HTTPException(
@@ -748,25 +795,30 @@ async def get_training_plot_endpoint(
         )
 
     # Get checkpoints
-    checkpoints = job_data.get("checkpoints", [])
+    checkpoints = job_data.checkpoints or []
 
-    # Try to get equity curve from stored plot_html in last checkpoint
+    # Try to get plot from last checkpoint
+    plot_html = ""
     if checkpoints:
         last_checkpoint = checkpoints[-1]
-        stored_plot = last_checkpoint.get("plot_html", "")
-        if stored_plot:
-            plot_html = stored_plot
+        plot_html = last_checkpoint.get("plot_html", "")
+        if plot_html:
+            pass  # Use stored plot
         else:
-            plot_html = _generate_checkpoint_plot_html(last_checkpoint, job_data.get("symbol", ""))
-    else:
+            # Try to get plot from Worker
+            plot_html = (
+                await manager.get_checkpoint_plot(job_id, last_checkpoint["generation"]) or ""
+            )
+
+    if not plot_html:
         # Fallback to simple fitness plot
-        plot_html = _generate_fitness_plot_html(checkpoints, job_data.get("symbol", ""))
+        plot_html = _generate_fitness_plot_html(checkpoints, job_data.symbol or "")
 
     return TrainingPlotResponse(
         job_id=job_id,
         plot_html=plot_html,
-        generation=job_data.get("generations_completed"),
-        fitness=job_data.get("best_fitness"),
+        generation=job_data.generations_completed,
+        fitness=job_data.best_fitness,
         created_at=datetime.utcnow(),
     )
 
@@ -783,33 +835,52 @@ async def get_checkpoint_plot_endpoint(
 
     Shows the equity curve at that specific generation.
     """
-    executor = get_real_training_executor()
-    job_data = await executor.get_job_status(job_id)
+    manager = get_training_process_manager()
 
-    if not job_data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Training job {job_id} not found",
+    # Get plot from Worker
+    plot_html = await manager.get_checkpoint_plot(job_id, generation)
+
+    if not plot_html:
+        # Fallback to generating plot from checkpoint data
+        job_data = await manager.get_job_status(job_id)
+        if not job_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Training job {job_id} not found",
+            )
+
+        checkpoints = job_data.checkpoints or []
+        checkpoint = next((c for c in checkpoints if c["generation"] == generation), None)
+
+        if not checkpoint:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Checkpoint generation {generation} not found for job {job_id}",
+            )
+
+        plot_html = _generate_checkpoint_plot_html(checkpoint, job_data.symbol or "")
+
+        return TrainingPlotResponse(
+            job_id=job_id,
+            plot_html=plot_html,
+            generation=generation,
+            fitness=checkpoint.get("fitness"),
+            created_at=datetime.fromisoformat(checkpoint["created_at"]),
         )
 
-    checkpoints = job_data.get("checkpoints", [])
+    # Get job data for response
+    job_data = await manager.get_job_status(job_id)
+    checkpoints = job_data.checkpoints if job_data else []
     checkpoint = next((c for c in checkpoints if c["generation"] == generation), None)
-
-    if not checkpoint:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Checkpoint generation {generation} not found for job {job_id}",
-        )
-
-    # Generate plot for specific checkpoint
-    plot_html = _generate_checkpoint_plot_html(checkpoint, job_data.get("symbol", ""))
 
     return TrainingPlotResponse(
         job_id=job_id,
         plot_html=plot_html,
         generation=generation,
-        fitness=checkpoint.get("fitness"),
-        created_at=datetime.fromisoformat(checkpoint["created_at"]),
+        fitness=checkpoint.get("fitness") if checkpoint else None,
+        created_at=datetime.fromisoformat(checkpoint["created_at"])
+        if checkpoint and checkpoint.get("created_at")
+        else datetime.utcnow(),
     )
 
 
@@ -824,8 +895,8 @@ async def get_training_progress_plot_endpoint(
 
     Returns structured data for client-side Plotly rendering.
     """
-    executor = get_real_training_executor()
-    job_data = await executor.get_job_status(job_id)
+    manager = get_training_process_manager()
+    job_data = await manager.get_job_status(job_id)
 
     if not job_data:
         raise HTTPException(
@@ -833,7 +904,7 @@ async def get_training_progress_plot_endpoint(
             detail=f"Training job {job_id} not found",
         )
 
-    checkpoints = job_data.get("checkpoints", [])
+    checkpoints = job_data.checkpoints or []
     generations = [c["generation"] for c in checkpoints]
     fitness_values = [c["fitness"] for c in checkpoints]
 
@@ -851,7 +922,7 @@ async def get_training_progress_plot_endpoint(
             }
         ],
         "layout": {
-            "title": f"Training Progress - {job_data.get('symbol', '')}",
+            "title": f"Training Progress - {job_data.symbol or ''}",
             "xaxis": {"title": "Generation"},
             "yaxis": {"title": "Fitness"},
             "showlegend": True,

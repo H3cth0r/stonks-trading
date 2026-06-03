@@ -242,6 +242,14 @@ class TrainingJobListResponse(BaseResponse):
     total: int = 0
 
 
+class TrainingJobStopResponse(BaseResponse):
+    """Response after stopping a training job."""
+
+    job_id: str
+    status: str  # stopped | failed
+    message: str | None = None
+
+
 class SelectCheckpointRequest(BaseModel):
     """Request to select checkpoint for deployment."""
 
