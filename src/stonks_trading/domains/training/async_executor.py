@@ -4,6 +4,8 @@ Phase 10C: Provides async training with real-time progress tracking.
 """
 
 import asyncio
+import json
+import math
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
@@ -245,8 +247,6 @@ class AsyncTrainingExecutor:
             await asyncio.sleep(0.5)  # Fast simulation
 
             # Calculate fitness (simulated improvement curve)
-            import math
-
             base_fitness = 0.5
             improvement = math.log(gen + 1) * 0.3
             noise = (gen % 5) * 0.02
@@ -297,8 +297,6 @@ class AsyncTrainingExecutor:
             job_id: Job ID
             job_data: Job data dict
         """
-        import json
-
         redis = await get_redis()
         key = f"training:job:{job_id}"
         await redis.setex(
@@ -316,8 +314,6 @@ class AsyncTrainingExecutor:
         Returns:
             Job data dict or None if not found
         """
-        import json
-
         redis = await get_redis()
         key = f"training:job:{job_id}"
         data = await redis.get(key)

@@ -68,7 +68,7 @@ Parity means that the extracted modules produce **identical results** (within fl
 
 ### 4. Feature Engineering
 
-**Location:** `src/stonks_trading/domains/trading/neat/features.py`
+**Location:** `src/stonks_trading/domains/strategies/neat_swing/features.py`
 
 **Guarantee:** Feature columns match NEAT/main.py line 115.
 
@@ -80,6 +80,24 @@ Parity means that the extracted modules produce **identical results** (within fl
 - `bb_width`: Bollinger Bands width
 
 **Test File:** `tests/parity/test_neat_main_py_parity.py::TestFeatureParity`
+
+### 5. Live Strategy Features
+
+**Location:** `src/stonks_trading/bots/neat_swing/strategy.py` and `src/stonks_trading/shared/features/live_features.py`
+
+**Guarantee:** The bot strategy's `compute_features()` and the live `LiveFeatureComputer` use the same resampling and `ta` library calls as the training pipeline and `NEAT/main.py`, ensuring training/live feature parity. The live implementation uses actual candle timestamps via `pd.DatetimeIndex` rather than synthetic indices.
+
+**Verified Behaviors:**
+- 1-hour resampling for `trend_1h` and `rsi_1h`
+- 15-minute resampling for `rsi_15m`
+- 1-minute Bollinger Band width and ROC
+- Same feature defaults when insufficient data is available
+
+**References:**
+- Live feature computer: `src/stonks_trading/shared/features/live_features.py`
+- Training features: `src/stonks_trading/domains/strategies/neat_swing/features.py`
+- Bot strategy: `src/stonks_trading/bots/neat_swing/strategy.py`
+- Original: `/Users/h3cth0r/Documents/strategy-research/NEAT/main.py` lines 60-88
 
 ## Dry-Run vs Backtest Verification
 

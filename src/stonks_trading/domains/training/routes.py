@@ -4,10 +4,13 @@ API layer - NOT imported by the bot container.
 These routes provide HTTP access to training domain functionality.
 """
 
+import json
 import pickle
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+import redis as redis_client
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi import Path as FastAPIPath
 
@@ -61,6 +64,7 @@ from stonks_trading.domains.training.services import (
     TrainingExecutor,
     get_training_process_manager,
 )
+from stonks_trading.shared.config import settings
 from stonks_trading.shared.logger import logger
 
 # Create router
@@ -537,12 +541,6 @@ async def list_training_jobs_endpoint(
 
     Returns jobs from Redis cache. Jobs expire after 7 days.
     """
-    import json
-
-    import redis as redis_client
-
-    from stonks_trading.shared.config import settings
-
     r = redis_client.Redis.from_url(settings.redis_url)
     job_keys = []
     for key in r.scan_iter("training:job:*", count=1000):
@@ -685,8 +683,6 @@ async def select_checkpoint_endpoint(
     )
 
     # Load genome from pickle file
-    from pathlib import Path
-
     genome_path = checkpoint_data.get("genome_path")
     if not genome_path:
         raise HTTPException(
@@ -952,8 +948,6 @@ def _generate_fitness_plot_html(checkpoints: list[dict], symbol: str) -> str:
         return "<div>No checkpoint data available yet</div>"
 
     try:
-        import json
-
         generations = [c["generation"] for c in checkpoints]
         fitness_values = [c["fitness"] for c in checkpoints]
 
@@ -1015,8 +1009,6 @@ def _generate_checkpoint_plot_html(checkpoint: dict, symbol: str) -> str:
         Plotly HTML string
     """
     try:
-        import json
-
         gen = checkpoint["generation"]
         fitness = checkpoint.get("fitness", 0)
         roi = checkpoint.get("roi", 0)

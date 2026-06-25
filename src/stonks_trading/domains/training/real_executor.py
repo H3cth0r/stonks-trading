@@ -19,6 +19,7 @@ This module provides:
 import asyncio
 import json
 import pickle
+import traceback
 import uuid
 import warnings
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from plotly.subplots import make_subplots
 
 from stonks_trading.domains.strategies.neat_swing.config import create_default_config
 from stonks_trading.domains.strategies.neat_swing.trading_env import TradingEnv
+from stonks_trading.domains.strategies.neat_swing.trainer import NeatTrainer
 from stonks_trading.domains.trading.entities import Genome
 from stonks_trading.domains.trading.repositories import save_genome as save_genome_to_db
 from stonks_trading.domains.trading.value_objects import Symbol
@@ -441,8 +443,6 @@ class RealTrainingExecutor:
             )
 
             # Create trainer
-            from stonks_trading.domains.strategies.neat_swing.trainer import NeatTrainer
-
             trainer = NeatTrainer(
                 train_data=train_df,
                 config=config,
@@ -505,8 +505,6 @@ class RealTrainingExecutor:
 
         except Exception as e:
             logger.error(f"Training job {job_id} failed: {e}")
-            import traceback
-
             traceback.print_exc()
             job_data = await self._load_job_state(job_id)
             if job_data:

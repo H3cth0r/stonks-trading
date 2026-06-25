@@ -13,10 +13,12 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from neat import Config, DefaultGenome
 from neat.nn import RecurrentNetwork
 
 from stonks_trading.bots.base.strategy import BaseStrategy
+from stonks_trading.domains.strategies.neat_swing.features import engineer_features
 from stonks_trading.domains.trading.entities import Signal
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.value_objects import Symbol
@@ -61,6 +63,87 @@ class NeatSwingStrategy(BaseStrategy):
     @property
     def version(self) -> str:
         return "1.0.0"
+
+    def compute_features(
+        self,
+        symbol: Symbol,
+        candles: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Compute NEAT market features from candle history.
+
+        Uses the SAME feature engineering as NEAT/main.py and the training
+        pipeline (domains/strategies/neat_swing/features.py) to guarantee
+        parity between training and live inference.
+
+        Args:
+            symbol: Trading symbol.
+            candles: Historical candles (most recent last). Expected keys
+                include timestamp/Datetime, open/Open, high/High, low/Low,
+                close/Close, and volume/Volume.
+
+        Returns:
+            Dictionary of features: trend_1h, rsi_1h, rsi_15m, roc, bb_width.
+        """
+        if len(candles) < 200:
+            return {
+                "trend_1h": 0.0,
+                "rsi_1h": 0.5,
+                "rsi_15m": 0.5,
+                "roc": 0.0,
+                "bb_width": 0.0,
+            }
+
+        # Build DataFrame from candles using real timestamps.
+        rows: list[dict[str, Any]] = []
+        timestamps: list[datetime] = []
+        for candle in candles:
+            ts = candle.get("timestamp") or candle.get("Datetime")
+            if ts is None:
+                continue
+            if isinstance(ts, str):
+                ts = pd.to_datetime(ts)
+            rows.append(
+                {
+                    "Open": candle.get("open", candle.get("Open", 0.0)),
+                    "High": candle.get("high", candle.get("High", 0.0)),
+                    "Low": candle.get("low", candle.get("Low", 0.0)),
+                    "Close": candle.get("close", candle.get("Close", 0.0)),
+                    "Volume": candle.get("volume", candle.get("Volume", 0.0)),
+                }
+            )
+            timestamps.append(ts)
+
+        if len(rows) < 200:
+            return {
+                "trend_1h": 0.0,
+                "rsi_1h": 0.5,
+                "rsi_15m": 0.5,
+                "roc": 0.0,
+                "bb_width": 0.0,
+            }
+
+        df = pd.DataFrame(rows)
+        df.index = pd.DatetimeIndex(timestamps)
+        df = df.sort_index().dropna()
+
+        features_df = engineer_features(df)
+        if features_df.empty:
+            return {
+                "trend_1h": 0.0,
+                "rsi_1h": 0.5,
+                "rsi_15m": 0.5,
+                "roc": 0.0,
+                "bb_width": 0.0,
+            }
+
+        last = features_df.iloc[-1]
+        return {
+            "trend_1h": float(last["trend_1h"]),
+            "rsi_1h": float(last["rsi_1h"]),
+            "rsi_15m": float(last["rsi_15m"]),
+            "roc": float(last["roc"]),
+            "bb_width": float(last["bb_width"]),
+        }
 
     def generate_signal(
         self,
