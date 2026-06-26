@@ -134,7 +134,7 @@ def load_and_engineer(
     df = pd.read_csv(
         data_path,
         skiprows=[1, 2],  # MultiIndex CSV format
-        header=1,
+        header=0,  # Match NEAT/main.py exactly; keeps the first data row
         names=cols,
         parse_dates=["Datetime"],
         index_col="Datetime",

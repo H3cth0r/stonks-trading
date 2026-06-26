@@ -13,10 +13,12 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from neat import Config, DefaultGenome
 from neat.nn import RecurrentNetwork
 
 from stonks_trading.bots.base.strategy import BaseStrategy
+from stonks_trading.domains.strategies.neat_swing.features import engineer_features
 from stonks_trading.domains.trading.entities import Signal
 from stonks_trading.domains.trading.enums import Side
 from stonks_trading.domains.trading.value_objects import Symbol
@@ -67,21 +69,20 @@ class NeatSwingStrategy(BaseStrategy):
         symbol: Symbol,
         candles: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Compute 5 market features for NEAT state vector.
+        """Compute NEAT market features from candle history.
 
-        Features 3-7 from NEAT/main.py TradingEnv.get_state():
-        - trend_1h: (SMA50 - SMA200) / SMA200 on 1h data
-        - rsi_1h: RSI(14) on 1h / 100
-        - rsi_15m: RSI(14) on 15m / 100
-        - roc: Rate of Change on 1m
-        - bb_width: Bollinger Band width on 1m
+        Uses the SAME feature engineering as NEAT/main.py and the training
+        pipeline (domains/strategies/neat_swing/features.py) to guarantee
+        parity between training and live inference.
 
         Args:
             symbol: Trading symbol.
-            candles: List of 1m OHLCV candles.
+            candles: Historical candles (most recent last). Expected keys
+                include timestamp/Datetime, open/Open, high/High, low/Low,
+                close/Close, and volume/Volume.
 
         Returns:
-            Dictionary with 5 market features.
+            Dictionary of features: trend_1h, rsi_1h, rsi_15m, roc, bb_width.
         """
         if len(candles) < 200:
             return {
@@ -92,63 +93,56 @@ class NeatSwingStrategy(BaseStrategy):
                 "bb_width": 0.0,
             }
 
-        import pandas as pd
-        import ta
+        # Build DataFrame from candles using real timestamps.
+        rows: list[dict[str, Any]] = []
+        timestamps: list[datetime] = []
+        for candle in candles:
+            ts = candle.get("timestamp") or candle.get("Datetime")
+            if ts is None:
+                continue
+            if isinstance(ts, str):
+                ts = pd.to_datetime(ts)
+            rows.append(
+                {
+                    "Open": candle.get("open", candle.get("Open", 0.0)),
+                    "High": candle.get("high", candle.get("High", 0.0)),
+                    "Low": candle.get("low", candle.get("Low", 0.0)),
+                    "Close": candle.get("close", candle.get("Close", 0.0)),
+                    "Volume": candle.get("volume", candle.get("Volume", 0.0)),
+                }
+            )
+            timestamps.append(ts)
 
-        closes = pd.Series([c["close"] for c in candles])
+        if len(rows) < 200:
+            return {
+                "trend_1h": 0.0,
+                "rsi_1h": 0.5,
+                "rsi_15m": 0.5,
+                "roc": 0.0,
+                "bb_width": 0.0,
+            }
 
-        # Create sequential datetime index if not present (for resampling)
-        start_time = pd.Timestamp("2024-01-01")
-        closes.index = pd.date_range(start=start_time, periods=len(closes), freq="1min")
+        df = pd.DataFrame(rows)
+        df.index = pd.DatetimeIndex(timestamps)
+        df = df.sort_index().dropna()
 
-        # Resample to 1h for trend and RSI
-        df_1h = closes.resample("1h").last().dropna()
+        features_df = engineer_features(df)
+        if features_df.empty:
+            return {
+                "trend_1h": 0.0,
+                "rsi_1h": 0.5,
+                "rsi_15m": 0.5,
+                "roc": 0.0,
+                "bb_width": 0.0,
+            }
 
-        # Trend: (SMA50 - SMA200) / SMA200
-        if len(df_1h) >= 200:
-            sma50 = ta.trend.SMAIndicator(df_1h, 50).sma_indicator()
-            sma200 = ta.trend.SMAIndicator(df_1h, 200).sma_indicator()
-            trend_1h = (sma50 - sma200) / sma200
-            trend_1h_value = trend_1h.iloc[-1] if not trend_1h.empty else 0.0
-        else:
-            trend_1h_value = 0.0
-
-        # RSI 1h
-        if len(df_1h) >= 14:
-            rsi_1h = ta.momentum.RSIIndicator(df_1h, 14).rsi() / 100.0
-            rsi_1h_value = rsi_1h.iloc[-1] if not rsi_1h.empty else 0.5
-        else:
-            rsi_1h_value = 0.5
-
-        # RSI 15m
-        df_15m = closes.resample("15min").last().dropna()
-        if len(df_15m) >= 14:
-            rsi_15m = ta.momentum.RSIIndicator(df_15m, 14).rsi() / 100.0
-            rsi_15m_value = rsi_15m.iloc[-1] if not rsi_15m.empty else 0.5
-        else:
-            rsi_15m_value = 0.5
-
-        # ROC on 1m
-        if len(closes) >= 11:
-            roc = ta.momentum.ROCIndicator(closes, 10).roc()
-            roc_value = roc.iloc[-1] if not roc.empty else 0.0
-        else:
-            roc_value = 0.0
-
-        # BB width on 1m
-        if len(closes) >= 20:
-            bb = ta.volatility.BollingerBands(closes, window=20)
-            bb_width = bb.bollinger_wband()
-            bb_width_value = bb_width.iloc[-1] if not bb_width.empty else 0.0
-        else:
-            bb_width_value = 0.0
-
+        last = features_df.iloc[-1]
         return {
-            "trend_1h": float(trend_1h_value),
-            "rsi_1h": float(rsi_1h_value),
-            "rsi_15m": float(rsi_15m_value),
-            "roc": float(roc_value),
-            "bb_width": float(bb_width_value),
+            "trend_1h": float(last["trend_1h"]),
+            "rsi_1h": float(last["rsi_1h"]),
+            "rsi_15m": float(last["rsi_15m"]),
+            "roc": float(last["roc"]),
+            "bb_width": float(last["bb_width"]),
         }
 
     def generate_signal(

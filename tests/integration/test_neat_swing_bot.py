@@ -129,8 +129,8 @@ class TestNeatSwingBotLifecycle:
         assert bot.bot_type == "neat_swing"
         assert bot.required_data_frequency == "1m"
         assert bot.context.instance_id == "test-bot-lifecycle"
-        assert bot.candle_queue.empty()
         assert not bot._running
+        assert bot._orchestrator is None
 
     @pytest.mark.asyncio
     async def test_bot_context_persists(self, bot: NeatSwingBot) -> None:
@@ -190,9 +190,17 @@ class TestNeatSwingBotStart:
     @pytest.mark.asyncio
     async def test_start_sets_running_flag(self, bot: NeatSwingBot) -> None:
         """start() sets _running to True and calls registration."""
+        from unittest.mock import MagicMock
 
         async def break_loop():
             bot._running = False
+
+        # Mock orchestrator properly - get_feature_computer is sync
+        mock_feature_computer = MagicMock()
+        mock_feature_computer.get_stats.return_value = {"has_features": True}
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.get_feature_computer.return_value = mock_feature_computer
+        bot.set_orchestrator(mock_orchestrator)
 
         with (
             patch("stonks_trading.bots.neat_swing.bot.register_bot_instance") as mock_register,
@@ -216,33 +224,13 @@ class TestNeatSwingBotStart:
             mock_update_status.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_start_connects_websocket(self, bot: NeatSwingBot) -> None:
-        """start() connects to WebSocket if available."""
-        mock_ws = AsyncMock()
-        bot._websocket = mock_ws
+    async def test_set_orchestrator_works(self, bot: NeatSwingBot) -> None:
+        """set_orchestrator() properly stores orchestrator reference."""
+        mock_orchestrator = AsyncMock()
 
-        async def break_loop():
-            bot._running = False
+        bot.set_orchestrator(mock_orchestrator)
 
-        with (
-            patch("stonks_trading.bots.neat_swing.bot.register_bot_instance") as mock_register,
-            patch("stonks_trading.bots.neat_swing.bot.update_bot_instance_status") as mock_update_status,
-            patch("stonks_trading.bots.neat_swing.bot.save_bot_state") as mock_save,
-            patch("stonks_trading.bots.neat_swing.bot.load_bot_state") as mock_load,
-            patch("stonks_trading.bots.neat_swing.bot.get_active_genome") as mock_genome,
-            patch("stonks_trading.bots.neat_swing.bot.get_scheduler_hook") as mock_scheduler,
-            patch.object(bot, "_main_loop", side_effect=break_loop),
-        ):
-            mock_register.return_value = AsyncMock()
-            mock_update_status.return_value = AsyncMock()
-            mock_save.return_value = AsyncMock()
-            mock_load.return_value = None
-            mock_genome.return_value = None
-            mock_scheduler.return_value = AsyncMock()
-
-            await bot.start()
-
-            mock_ws.connect.assert_called_once()
+        assert bot._orchestrator is mock_orchestrator
 
 
 class TestNeatSwingBotStop:
@@ -267,10 +255,8 @@ class TestNeatSwingBotStop:
             assert bot._running is False
 
     @pytest.mark.asyncio
-    async def test_stop_disconnects_websocket(self, bot: NeatSwingBot) -> None:
-        """stop() disconnects WebSocket."""
-        mock_ws = AsyncMock()
-        bot._websocket = mock_ws
+    async def test_stop_no_websocket_cleanup(self, bot: NeatSwingBot) -> None:
+        """stop() no longer disconnects WebSocket (orchestrator handles it)."""
         bot._running = True
 
         with (
@@ -284,7 +270,8 @@ class TestNeatSwingBotStop:
 
             await bot.stop()
 
-            mock_ws.disconnect.assert_called_once()
+            # Should complete without error (no WebSocket to disconnect)
+            assert not bot._running
 
     @pytest.mark.asyncio
     async def test_stop_updates_status(self, bot: NeatSwingBot) -> None:
@@ -308,11 +295,11 @@ class TestNeatSwingBotStop:
 
 
 class TestNeatSwingBotCandleProcessing:
-    """Tests for candle handling."""
+    """Tests for candle handling (now no-op with IngestionOrchestrator)."""
 
     @pytest.mark.asyncio
-    async def test_handle_candle_queues_message(self, bot: NeatSwingBot) -> None:
-        """handle_candle() adds candle to queue."""
+    async def test_handle_candle_is_no_op(self, bot: NeatSwingBot) -> None:
+        """handle_candle() is now a no-op (bot polls orchestrator instead)."""
         candle = {
             "symbol": "BTC_USD",
             "close": 50000.0,
@@ -322,24 +309,11 @@ class TestNeatSwingBotCandleProcessing:
             "volume": 1.5,
         }
 
+        # Should complete without error and do nothing
         await bot.handle_candle(candle)
 
-        assert not bot.candle_queue.empty()
-        queued = await asyncio.wait_for(bot.candle_queue.get(), timeout=1.0)
-        assert queued["close"] == 50000.0
-
-    @pytest.mark.asyncio
-    async def test_handle_candle_extracts_symbol(self, bot: NeatSwingBot) -> None:
-        """handle_candle() accepts candle and queues it."""
-        candle = {
-            "symbol": "BTC_USD",
-            "close": 50000.0,
-        }
-
-        await bot.handle_candle(candle)
-
-        queued = await asyncio.wait_for(bot.candle_queue.get(), timeout=1.0)
-        assert queued["symbol"] == "BTC_USD"
+        # No queue to check - handle_candle is now a no-op
+        assert True  # If we got here, test passes
 
 
 class TestNeatSwingBotStatePersistence:

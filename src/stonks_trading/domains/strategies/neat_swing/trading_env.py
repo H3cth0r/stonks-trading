@@ -136,8 +136,11 @@ class TradingEnv:
         # Combine [Invested, Unr_PnL, 5 Market Indicators] = 7 Inputs
         state = np.hstack(([is_invested, unrealized_pnl], mkt))
 
-        # Clean inputs
-        return np.nan_to_num(np.clip(state, -5.0, 5.0))
+        # Clean inputs - handle None, NaN, inf values
+        state = np.array(state, dtype=np.float64)
+        state = np.nan_to_num(state, nan=0.0, posinf=0.0, neginf=0.0)
+        state = np.clip(state, -5.0, 5.0)
+        return state
 
     def _apply_slippage(self, price: float, side: str) -> float:
         """Apply slippage to price for dry-run simulation.

@@ -393,7 +393,7 @@ def _model_to_genome(model: GenomeModel) -> Genome:
         id=model.id,
         genome_data=model.genome_data or b"",
         fitness=model.fitness_score or model.fitness,  # type: ignore[attr-defined]
-        generation=0,
+        generation=getattr(model, "generation", 0) or 0,
         symbol=Symbol(value=model.symbol) if model.symbol else None,
         model_family=model.model_family,
         artifact_uri=model.artifact_uri,
@@ -952,6 +952,23 @@ async def list_bot_instances_by_type(bot_type: str) -> list[BotInstance]:
         )
         for m in models
     ]
+
+
+async def delete_bot_instance(bot_type: str, instance_id: str) -> bool:
+    """Delete bot instance from registry.
+
+    Args:
+        bot_type: Bot type identifier
+        instance_id: Bot instance ID
+
+    Returns:
+        True if deleted, False if not found
+    """
+    deleted = await BotInstanceModel.filter(
+        bot_type=bot_type,
+        instance_id=instance_id,
+    ).delete()
+    return bool(deleted > 0)
 
 
 # =============================================================================

@@ -98,31 +98,47 @@ class IngestionOrchestrator:
         )
 
     async def _backfill_symbol(self, symbol: Symbol) -> None:
-        """Backfill last 24 hours of data.
+        """Backfill last N hours of data with gap detection.
 
         Checks DuckDB for existing data and fills any gaps by
-        querying the adapter's REST API.
+        querying the adapter's REST API. On fresh start, backfills
+        200 hours to ensure LiveFeatureComputer has enough data.
 
         Args:
             symbol: Symbol to backfill
         """
-
         end = datetime.now(UTC)
-        start = end - timedelta(hours=24)
 
         # Check what we already have
         latest = self.duckdb.get_latest_timestamp(symbol)
+
         if latest:
             # Handle timezone-aware vs timezone-naive datetime comparison
             if latest.tzinfo is None:
                 latest = latest.replace(tzinfo=UTC)
-            start = latest + timedelta(minutes=1)
 
-        if start >= end:
+            # Calculate gap
+            gap = end - latest
+
+            if gap > timedelta(hours=1):  # Significant gap
+                logger.warning(
+                    "Data gap detected - will backfill",
+                    symbol=symbol.value,
+                    last_data=latest.isoformat(),
+                    gap_hours=gap.total_seconds() / 3600,
+                )
+
+            start = latest + timedelta(minutes=1)
+        else:
+            # Fresh start - backfill 200 hours minimum for LiveFeatureComputer
+            start = end - timedelta(hours=200)
             logger.info(
-                "No backfill needed, data is up to date",
+                "No existing data - backfilling 200 hours",
                 symbol=symbol.value,
             )
+
+        if start >= end:
+            logger.info("No backfill needed, data is up to date", symbol=symbol.value)
             return
 
         logger.info(
@@ -313,6 +329,14 @@ class IngestionOrchestrator:
                 await self._flush_buffer(symbol)
 
         logger.info("Ingestion orchestrator stopped")
+
+    def get_feature_computer(self) -> LiveFeatureComputer:
+        """Get the LiveFeatureComputer for bots to use.
+
+        Returns:
+            LiveFeatureComputer instance with rolling buffers
+        """
+        return self.features
 
     def get_stats(self) -> dict[str, Any]:
         """Get orchestrator statistics.

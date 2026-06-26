@@ -4,6 +4,7 @@
 # - MinIO (S3-compatible storage for local Tigris replacement)
 # - PostgreSQL (for local Neon replacement)
 # - API (FastAPI backend)
+# - Bot Worker (Process manager for bot subprocesses)
 # - Dashboard (Streamlit UI)
 #
 # Usage:
@@ -11,6 +12,7 @@
 #   # MinIO console: http://localhost:9001 (minioadmin/minioadmin)
 #   # PostgreSQL: localhost:5432
 #   # API: http://localhost:8000
+#   # Bot Worker: http://localhost:8001
 #   # Dashboard: http://localhost:8501
 #
 # To stop:
@@ -112,7 +114,38 @@ services:
     networks:
       - stonks-network
 
-  # API Service for Phase 3 testing
+  # Bot Worker Service - Spawns and manages bot subprocesses
+  # Runs separately from API to isolate bot dependencies (NEAT, pandas, ta)
+  bot-worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    container_name: stonks-bot-worker
+    ports:
+      - "8001:8001"  # Worker API port (internal use)
+    environment:
+      - DATABASE_URL=postgres://stonks:stonks@postgres:5432/stonks_trading
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../src:/app/src:ro  # Mount source for development
+      - ../data:/app/data  # Shared DuckDB storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - stonks-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # API Service - Lightweight FastAPI backend
+  # Delegates bot spawning to Bot Worker via HTTP
   api:
     build:
       context: ..
@@ -126,12 +159,16 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - LOG_LEVEL=DEBUG
+      - MASSIVE_API_KEY=${MASSIVE_API_KEY:-}
     volumes:
       - ../src:/app/src:ro  # Mount source for development
+      - ../data:/app/data  # Persist DuckDB data
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      bot-worker:
         condition: service_healthy
     networks:
       - stonks-network

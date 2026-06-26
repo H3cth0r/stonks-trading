@@ -1,4 +1,4 @@
-"""NEAT Swing Bot CLI runner.
+"""NEAT Swing Bot CLI runner - with IngestionOrchestrator integration.
 
 Entry point for running the live trading bot:
     python -m stonks_trading.bots.neat_swing
@@ -23,8 +23,12 @@ from stonks_trading.bots.neat_swing import create_neat_swing_strategy
 from stonks_trading.bots.neat_swing.state import NeatSwingState
 from stonks_trading.bots.startup import run_startup_recovery
 from stonks_trading.domains.trading.adapters import DryRunAdapter
+from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.features.live_features import LiveFeatureComputer
+from stonks_trading.shared.ingest.binance import BinanceAdapter
+from stonks_trading.shared.ingest.orchestrator import IngestionOrchestrator
 from stonks_trading.shared.scheduler import Scheduler
-from stonks_trading.shared.websocket_client import WebSocketClient
+from stonks_trading.shared.storage.duckdb_client import DuckDBClient
 
 # Register NeatSwingStrategy factory (Phase 10C - strategy injection)
 StrategyRegistry.register("neat_swing", create_neat_swing_strategy)
@@ -176,13 +180,23 @@ async def run_bot(
 
     bot.adapter = adapter
 
-    # Set up WebSocket client
-    ws_symbols = [s.replace("_", "").lower() + "usdt" for s in symbols]
-    websocket = WebSocketClient(
-        symbols=ws_symbols,
-        callback=bot.handle_candle,
+    # NEW: Create IngestionOrchestrator for market data
+    # This replaces the WebSocketClient
+    duckdb = DuckDBClient()
+    duckdb.connect()
+
+    binance_adapter = BinanceAdapter(use_testnet=(mode == "dry_run"))
+    feature_computer = LiveFeatureComputer(window_hours=200)
+
+    orchestrator = IngestionOrchestrator(
+        adapter=binance_adapter,
+        duckdb=duckdb,
+        tigris=None,  # Optional: add Tigris client for archival
+        feature_computer=feature_computer,
     )
-    bot.set_websocket(websocket)  # type: ignore[attr-defined]
+
+    # NEW: Connect bot to orchestrator's feature computer
+    bot.set_orchestrator(orchestrator)  # type: ignore[attr-defined]
 
     # Set up scheduler
     scheduler = Scheduler()
@@ -191,13 +205,20 @@ async def run_bot(
     # Handle shutdown
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(bot, scheduler)))
+        loop.add_signal_handler(
+            sig, lambda: asyncio.create_task(shutdown(bot, scheduler, orchestrator))
+        )
 
     # Start heartbeat task
     heartbeat_task = asyncio.create_task(heartbeat_loop(bot))
 
     try:
-        logger.info(f"Starting bot neat_swing/{instance_id} with symbols {symbols} in {mode} mode")
+        logger.info(f"Starting bot with IngestionOrchestrator for symbols {symbols}")
+
+        # Start orchestrator first (backfills gaps, then connects WebSocket)
+        await orchestrator.start([Symbol(value=s) for s in symbols])
+
+        # Then start bot (now has access to primed feature computer)
         await bot.start()
     except Exception as e:
         logger.error(f"Bot error: {e}")
@@ -222,15 +243,17 @@ async def heartbeat_loop(bot: Any) -> None:
         await asyncio.sleep(60)
 
 
-async def shutdown(bot: Any, scheduler: Scheduler) -> None:
+async def shutdown(bot: Any, scheduler: Scheduler, orchestrator: IngestionOrchestrator) -> None:
     """Graceful shutdown handler.
 
     Args:
         bot: Bot instance to stop
         scheduler: Scheduler to stop
+        orchestrator: IngestionOrchestrator to stop
     """
     logger.info("Shutdown signal received")
     scheduler.stop()
+    await orchestrator.stop()
     await bot.stop()
 
 

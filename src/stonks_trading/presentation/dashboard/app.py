@@ -33,13 +33,13 @@ st.markdown("""
 
 This dashboard provides real-time monitoring of:
 
-- **Operations Hub** - Bot fleet overview, activity timeline, balances
+- **Portfolio Overview** - Master portfolio view with real-time metrics
 - **Live Trading** - Real-time equity curves, positions, and trades
-- **Training Progress** - NEAT training runs and fitness evolution
-- **Model Registry** - Genome management and activation
-- **Backtest** - Historical backtest results
-- **Trade Log** - Complete trade history with filters
-- **Risk Dashboard** - Drawdown monitoring and kill switch
+- **Strategy Management** - NEAT training runs and fitness evolution
+- **Performance Analytics** - Historical backtest and live performance
+- **Trade Explorer** - Complete trade history with filters
+- **Risk Monitor** - Drawdown monitoring and kill switch
+- **Data Explorer** - Market data backfill and visualization
 
 ### Quick Stats
 """)
@@ -78,7 +78,11 @@ st.info("👈 Select a page from the sidebar to get started!")
 st.sidebar.markdown("---")
 st.sidebar.subheader("Connection Status")
 health = fetch_sync("/health")
-if health and health.get("status") == "healthy":
-    st.sidebar.success("✅ API Connected")
+if health and health.get("api_healthy") is True:
+    api_status = health.get("status", "unknown")
+    if api_status == "healthy":
+        st.sidebar.success("✅ API Connected")
+    else:
+        st.sidebar.warning(f"⚠️ API {api_status.title()}")
 else:
     st.sidebar.error("❌ API Disconnected")

@@ -6,5 +6,6 @@ from various exchanges. Supports WebSocket streaming and REST API backfill.
 
 from stonks_trading.shared.ingest.adapter import Candle, MarketDataAdapter
 from stonks_trading.shared.ingest.binance import BinanceAdapter
+from stonks_trading.shared.ingest.massive import MassiveAdapter
 
-__all__ = ["Candle", "MarketDataAdapter", "BinanceAdapter"]
+__all__ = ["Candle", "MarketDataAdapter", "BinanceAdapter", "MassiveAdapter"]

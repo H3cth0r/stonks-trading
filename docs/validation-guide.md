@@ -221,10 +221,64 @@ pytest tests/integration/test_bot.py -v
 ### Test Streamlit Dashboard
 
 ```bash
-streamlit run src/stonks_trading/dashboard/app.py
+streamlit run src/stonks_trading/presentation/dashboard/app.py
 ```
 
 Visit http://localhost:8501
+
+---
+
+# Phase 6: Data Explorer, Massive Backfill, and Training Delegation
+
+### Start Services
+
+```bash
+cd infra
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+Expected healthy services: `stonks-api`, `stonks-bot-worker`, `stonks-dashboard`, `stonks-postgres`, `stonks-redis`, `stonks-minio`.
+
+### Validate Endpoints
+
+```bash
+bash tmp/validate_endpoints.sh
+```
+
+Expected: 19/19 endpoints pass.
+
+### Validate Training Delegation End-to-End
+
+```bash
+# Create an async training job (API delegates to Worker subprocess)
+curl -X POST http://localhost:8000/api/v1/training/async-training-jobs \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTC_USD","generations":2,"population_size":20,"training_capital":10000,"checkpoint_interval":1}'
+
+# Poll until status is completed
+curl -s "http://localhost:8000/api/v1/training/async-training-jobs/{job_id}"
+
+# Verify artifacts and model persistence
+curl -s "http://localhost:8000/api/v1/training/async-training-jobs/{job_id}/checkpoints"
+curl -s "http://localhost:8000/api/v1/training/async-training-jobs/{job_id}/plot" | wc -c
+curl -s http://localhost:8000/api/v1/genomes
+curl -s http://localhost:8000/api/v1/models/
+```
+
+Expected:
+- API `/health` stays responsive during training.
+- Worker spawns training subprocess and reports progress via Redis.
+- Checkpoints saved every `checkpoint_interval` generations.
+- Plot HTML generated (large response).
+- Winner genome saved to PostgreSQL and visible in `/models/`.
+
+### Validate Dashboard Pages
+
+| Page | URL | Tabs |
+|------|-----|------|
+| Trading Hub | http://localhost:8501 | Portfolio, Bot Control, Models/Training, Configuration |
+| Analytics Hub | http://localhost:8501/page/Analytics_Hub | Performance, Risk + Capital |
+| Market Hub | http://localhost:8501/page/Market_Hub | Market Data, Trade History |
 
 ---
 
@@ -245,7 +299,20 @@ Expected Results by Phase:
 - Phase 2: 10+ ingestion tests passing
 - Phase 3: 25 API tests passing
 - Phase 4: 23 exchange tests passing
-- Phase 5: (when implemented)
+- Phase 5: bot + dashboard tests passing
+- Phase 6: training delegation tests passing
+
+### Pattern Validation
+
+```bash
+python scripts/validate_phase_7_8.py
+```
+
+Checks:
+- No `TYPE_CHECKING` blocks
+- No string annotations
+- No imports inside functions in `domains/training/` and `domains/backtesting/`
+- Repositories use standalone functions only
 
 ### Validation Checklist
 
@@ -258,6 +325,8 @@ Expected Results by Phase:
 - [ ] Binance testnet validated (if Phase 4+)
 - [ ] Trade execution working (if Phase 4+)
 - [ ] Bot starting without errors (if Phase 5+)
+- [ ] Training delegation produces genomes and plots (Phase 6+)
+- [ ] Pattern validation passes (Phase 7/8+)
 
 ---
 

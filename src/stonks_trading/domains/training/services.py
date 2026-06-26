@@ -14,11 +14,13 @@ Service rules (per architecture.md):
 - Pure transformation functions where possible
 """
 
+import json
 import pickle
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
+import httpx
 import neat
 import pandas as pd
 
@@ -29,7 +31,11 @@ from stonks_trading.domains.strategies.neat_swing.trainer import (
     evaluate_genome_on_data,
 )
 from stonks_trading.domains.trading.value_objects import Symbol
+from stonks_trading.shared.logger import logger
+from stonks_trading.shared.redis_client import get_redis
 from stonks_trading.shared.storage.duckdb_client import DuckDBClient
+
+from .entities import StartTrainingRequest, TrainingJob
 
 
 class TrainingExecutor:
@@ -286,6 +292,63 @@ class TrainingDataProvider:
 
         return await self._fetch_data(symbol, start_date, end_date, "validation")
 
+    async def fetch_all_available_data(
+        self,
+        symbol: str,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Fetch ALL available data with 80/20 train/test split.
+
+        Mimics NEAT/main.py load_data() behavior:
+        - Uses entire available dataset from DuckDB
+        - Splits 80% train, 20% test
+        - Returns both train and test DataFrames
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            Tuple of (train_df, test_df)
+        """
+        self._db_client.connect()
+
+        try:
+            symbol_vo = Symbol(value=symbol)
+
+            # Get ALL data (not just last 30 days)
+            # Use a very early start date to get all available data
+            start_date = datetime(2020, 1, 1)
+            end_date = datetime.utcnow()
+
+            raw_data = self._db_client.get_data_range(
+                symbol=symbol_vo,
+                start=start_date,
+                end=end_date,
+            )
+
+            if not raw_data:
+                raise ValueError(f"No data found for {symbol}")
+
+            df = self._to_dataframe(raw_data)
+            df = self._ensure_features(df)
+
+            # 80/20 split like NEAT/main.py line 90-91
+            split_idx = int(len(df) * 0.8)
+            train_df = df.iloc[:split_idx]
+            test_df = df.iloc[split_idx:]
+
+            logger.info(
+                "Loaded training data",
+                symbol=symbol,
+                total_rows=len(df),
+                train_rows=len(train_df),
+                test_rows=len(test_df),
+            )
+
+            return train_df, test_df
+
+        finally:
+            self._db_client.close()
+
     async def _fetch_data(
         self,
         symbol: str,
@@ -347,20 +410,28 @@ class TrainingDataProvider:
         return df
 
     def _ensure_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Ensure all required features exist in DataFrame.
+        """Ensure all required features exist and are populated.
 
-        If features are missing, compute them using engineer_features.
+        Recomputes features using engineer_features when required columns are
+        missing or when any required feature contains NaN values. This guards
+        against training on stale/corrupted DuckDB rows that were inserted
+        without features (e.g., raw massive backfill candles).
 
         Args:
             df: DataFrame with OHLCV data
 
         Returns:
-            DataFrame with all required features
+            DataFrame with all required features computed
         """
-        if all(feat in df.columns for feat in self.REQUIRED_FEATURES):
-            return df
+        if not all(feat in df.columns for feat in self.REQUIRED_FEATURES):
+            return engineer_features(df)
 
-        return engineer_features(df)
+        if df[self.REQUIRED_FEATURES].isna().any().any():
+            # Drop stale/null feature columns so engineer_features can recreate them.
+            df = df.drop(columns=[c for c in self.REQUIRED_FEATURES if c in df.columns])
+            return engineer_features(df)
+
+        return df
 
 
 class CheckpointManager:
@@ -433,3 +504,212 @@ class CheckpointManager:
                 kept.append(cp)
 
         return kept
+
+
+class TrainingProcessManager:
+    """Manages training jobs via Worker container.
+
+    All training operations are delegated to the Bot Worker via HTTP API.
+    The API container never runs NEAT training directly.
+
+    Mirrors ProcessManager from botcontrol domain.
+    """
+
+    def __init__(self):
+        """Initialize with Worker HTTP client."""
+        self._worker_base_url = "http://bot-worker:8001"
+        logger.info("TrainingProcessManager initialized (Worker delegation mode)")
+
+    async def start_training(
+        self,
+        symbol: str,
+        generations: int,
+        population_size: int,
+        training_capital: float,
+        checkpoint_interval: int,
+        strategy_type: str = "neat_swing",
+        csv_path: str | None = None,
+    ):
+        """Start training by delegating to Worker.
+
+        Args:
+            symbol: Trading symbol (e.g., "BTC_USD")
+            generations: Number of NEAT generations
+            population_size: NEAT population size
+            training_capital: Initial capital for training
+            checkpoint_interval: Save checkpoint every N generations
+            strategy_type: Strategy type (default: "neat_swing")
+            csv_path: Optional CSV path to load data exactly like NEAT/main.py
+
+        Returns:
+            TrainingJob with job_id for polling
+        """
+        logger.info(
+            f"Delegating training for {symbol} to Worker",
+            generations=generations,
+            population_size=population_size,
+            csv_path=csv_path,
+        )
+
+        request = StartTrainingRequest(
+            symbol=symbol,
+            generations=generations,
+            population_size=population_size,
+            training_capital=training_capital,
+            checkpoint_interval=checkpoint_interval,
+            strategy_type=strategy_type,
+            csv_path=csv_path,
+        )
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self._worker_base_url}/training/jobs",
+                    json={
+                        "symbol": request.symbol,
+                        "generations": request.generations,
+                        "population_size": request.population_size,
+                        "training_capital": request.training_capital,
+                        "checkpoint_interval": request.checkpoint_interval,
+                        "strategy_type": request.strategy_type,
+                        "csv_path": request.csv_path,
+                    },
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                return TrainingJob(
+                    job_id=data["job_id"],
+                    symbol=symbol,
+                    status=data["status"],
+                    generations_total=generations,
+                    generations_completed=0,
+                    best_fitness=None,
+                    best_roi=None,
+                    progress_pct=0.0,
+                    checkpoint_dir=f"data/training/{data['job_id']}",
+                    started_at=datetime.fromisoformat(data["started_at"]),
+                    error=None,
+                )
+
+        except Exception as e:
+            logger.error(f"Worker failed to start training: {e}")
+            raise RuntimeError(f"Worker failed to start training: {e}") from e
+
+    async def get_job_status(self, job_id: str):
+        """Get training job status from Worker."""
+        try:
+            redis = await get_redis()
+            data = await redis.get(f"training:job:{job_id}")
+
+            if not data:
+                return None
+
+            if isinstance(data, bytes):
+                data = data.decode("utf-8")
+
+            job_data = json.loads(data)
+            return TrainingJob(
+                job_id=job_data["id"],
+                symbol=job_data["symbol"],
+                status=job_data["status"],
+                generations_total=job_data["generations_total"],
+                generations_completed=job_data["generations_completed"],
+                best_fitness=job_data.get("best_fitness"),
+                best_roi=job_data.get("best_roi"),
+                progress_pct=job_data.get("progress_pct", 0.0),
+                checkpoint_dir=job_data.get("checkpoint_dir"),
+                started_at=datetime.fromisoformat(job_data["started_at"])
+                if job_data.get("started_at")
+                else None,
+                error=job_data.get("error"),
+                checkpoints=job_data.get("checkpoints", []),
+                all_time_best_model_id=job_data.get("all_time_best_model_id"),
+                all_time_best_roi=job_data.get("all_time_best_roi"),
+                all_time_best_test_roi=job_data.get("all_time_best_test_roi"),
+                last_winner_model_id=job_data.get("last_winner_model_id"),
+                last_winner_roi=job_data.get("last_winner_roi"),
+                last_winner_test_roi=job_data.get("last_winner_test_roi"),
+                selected_winner=job_data.get("selected_winner"),
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get training status: {e}")
+            return None
+
+    async def stop_training(self, job_id: str, graceful: bool = True) -> bool:
+        """Stop training job via Worker."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self._worker_base_url}/training/jobs/{job_id}/stop",
+                    params={"graceful": graceful},
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to stop training: {e}")
+            return False
+
+    async def list_checkpoints(self, job_id: str) -> list[dict[str, Any]]:
+        """List all checkpoints for a training job."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self._worker_base_url}/training/jobs/{job_id}/checkpoints",
+                    timeout=10.0,
+                )
+                if response.status_code == 404:
+                    return []
+                response.raise_for_status()
+                data = response.json()
+                return data.get("checkpoints", [])
+        except Exception as e:
+            logger.error(f"Failed to list checkpoints: {e}")
+            return []
+
+    async def get_checkpoint(self, job_id: str, generation: int) -> dict[str, Any] | None:
+        """Get checkpoint data from Worker."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self._worker_base_url}/training/jobs/{job_id}/checkpoints/{generation}",
+                    timeout=10.0,
+                )
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Failed to get checkpoint: {e}")
+            return None
+
+    async def get_checkpoint_plot(self, job_id: str, generation: int) -> str | None:
+        """Get checkpoint plot HTML from Worker."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self._worker_base_url}/training/jobs/{job_id}/checkpoints/{generation}/plot",
+                    timeout=10.0,
+                )
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                data = response.json()
+                return data.get("plot_html")
+        except Exception as e:
+            logger.error(f"Failed to get checkpoint plot: {e}")
+            return None
+
+
+def get_training_process_manager() -> TrainingProcessManager:
+    """Get or create global TrainingProcessManager."""
+    global _training_process_manager
+    if _training_process_manager is None:
+        _training_process_manager = TrainingProcessManager()
+    return _training_process_manager
+
+
+_training_process_manager: TrainingProcessManager | None = None

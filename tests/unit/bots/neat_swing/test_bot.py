@@ -1,6 +1,6 @@
 """Unit tests for NeatSwingBot core methods.
 
-Covers the previously untested live-trading methods:
+Covers the live-trading methods using the IngestionOrchestrator pattern:
 - _build_state_vector
 - _determine_action
 - _execute_trade
@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from stonks_trading.bots.base.context import BotContext
@@ -39,15 +40,6 @@ def mock_strategy() -> MagicMock:
     strategy = MagicMock(spec=NeatSwingStrategy)
     strategy.networks = {}
     strategy.neat_config = MagicMock()
-    strategy.compute_features = MagicMock(
-        return_value={
-            "trend_1h": 0.0,
-            "rsi_1h": 0.5,
-            "rsi_15m": 0.5,
-            "roc": 0.0,
-            "bb_width": 0.0,
-        }
-    )
 
     def fake_build_state_vector(
         price: float, position: Position | None, features: dict[str, Any]
@@ -70,8 +62,41 @@ def mock_strategy() -> MagicMock:
 
 
 @pytest.fixture
-def bot(mock_strategy: MagicMock) -> NeatSwingBot:
-    """Create a NeatSwingBot with mocked strategy."""
+def mock_feature_computer() -> MagicMock:
+    """Create a mock LiveFeatureComputer returning a feature DataFrame."""
+    computer = MagicMock()
+    feature_df = pd.DataFrame(
+        [
+            {
+                "Open": 49000.0,
+                "High": 51000.0,
+                "Low": 48500.0,
+                "Close": 50000.0,
+                "Volume": 1.5,
+                "trend_1h": 0.0,
+                "rsi_1h": 0.5,
+                "rsi_15m": 0.5,
+                "roc": 0.0,
+                "bb_width": 0.0,
+            }
+        ]
+    )
+    computer.get_feature_df.return_value = feature_df
+    computer.get_stats.return_value = {"has_features": True, "candles": 1}
+    return computer
+
+
+@pytest.fixture
+def mock_orchestrator(mock_feature_computer: MagicMock) -> MagicMock:
+    """Create a mock IngestionOrchestrator."""
+    orchestrator = MagicMock()
+    orchestrator.get_feature_computer.return_value = mock_feature_computer
+    return orchestrator
+
+
+@pytest.fixture
+def bot(mock_strategy: MagicMock, mock_orchestrator: MagicMock) -> NeatSwingBot:
+    """Create a NeatSwingBot with mocked strategy and orchestrator."""
     context = BotContext(bot_type="neat_swing", instance_id="test-bot")
     symbol = Symbol(value="BTC_USD")
     state = NeatSwingState()
@@ -82,6 +107,7 @@ def bot(mock_strategy: MagicMock) -> NeatSwingBot:
         strategy=mock_strategy,
         initial_state=state,
     )
+    bot_instance.set_orchestrator(mock_orchestrator)
     return bot_instance
 
 
@@ -110,19 +136,22 @@ def mock_adapter() -> MagicMock:
 class TestBuildStateVector:
     """Tests for _build_state_vector."""
 
-    def test_state_vector_length(self, bot: NeatSwingBot) -> None:
+    @pytest.mark.asyncio
+    async def test_state_vector_length(self, bot: NeatSwingBot) -> None:
         """State vector must have exactly 7 elements."""
-        candle = {"close": 50000.0, "symbol": "BTC_USD"}
-        vector = bot._build_state_vector(Symbol(value="BTC_USD"), candle)
+        vector = await bot._build_state_vector(Symbol(value="BTC_USD"))
+        assert vector is not None
         assert len(vector) == 7
 
-    def test_not_invested_first_element(self, bot: NeatSwingBot) -> None:
+    @pytest.mark.asyncio
+    async def test_not_invested_first_element(self, bot: NeatSwingBot) -> None:
         """When no position, first element is -1.0."""
-        candle = {"close": 50000.0, "symbol": "BTC_USD"}
-        vector = bot._build_state_vector(Symbol(value="BTC_USD"), candle)
+        vector = await bot._build_state_vector(Symbol(value="BTC_USD"))
+        assert vector is not None
         assert vector[0] == -1.0
 
-    def test_invested_first_element(self, bot: NeatSwingBot) -> None:
+    @pytest.mark.asyncio
+    async def test_invested_first_element(self, bot: NeatSwingBot) -> None:
         """When holding position, first element is 1.0."""
         position = Position(
             symbol=Symbol(value="BTC_USD"),
@@ -130,15 +159,23 @@ class TestBuildStateVector:
             entry_price=Money(amount=49000.0, currency="USDT"),
         )
         bot.state.positions[Symbol(value="BTC_USD")] = position
-        candle = {"close": 50000.0, "symbol": "BTC_USD"}
-        vector = bot._build_state_vector(Symbol(value="BTC_USD"), candle)
+        vector = await bot._build_state_vector(Symbol(value="BTC_USD"))
+        assert vector is not None
         assert vector[0] == 1.0
 
-    def test_values_clipped(self, bot: NeatSwingBot) -> None:
+    @pytest.mark.asyncio
+    async def test_values_clipped(self, bot: NeatSwingBot) -> None:
         """All values in state vector are within [-5, 5]."""
-        candle = {"close": 50000.0, "symbol": "BTC_USD"}
-        vector = bot._build_state_vector(Symbol(value="BTC_USD"), candle)
+        vector = await bot._build_state_vector(Symbol(value="BTC_USD"))
+        assert vector is not None
         assert all(-5.0 <= v <= 5.0 for v in vector)
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_features(self, bot: NeatSwingBot) -> None:
+        """Returns None when orchestrator has no feature data."""
+        bot._orchestrator.get_feature_computer.return_value.get_feature_df.return_value = None
+        vector = await bot._build_state_vector(Symbol(value="BTC_USD"))
+        assert vector is None
 
 
 class TestDetermineAction:
@@ -185,7 +222,6 @@ class TestDetermineAction:
         """No trade within 15 minutes of last trade."""
         now = datetime.utcnow()
         bot.state.last_trade_time = now
-        # Patch loop time to be just 1 second after last_trade_time (< 15 min)
         with patch("asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.time.return_value = now.timestamp() + 1
             action = bot._determine_action(0.7, 0.3, Symbol(value="BTC_USD"))
@@ -257,8 +293,7 @@ class TestExecuteTrade:
     async def test_no_adapter_returns_none(self, bot: NeatSwingBot) -> None:
         """_execute_trade returns None when no adapter."""
         bot.adapter = None
-        candle = {"close": 50000.0}
-        result = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
+        result = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, 50000.0)
         assert result is None
 
     @pytest.mark.asyncio
@@ -280,8 +315,7 @@ class TestExecuteTrade:
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
-            candle = {"close": 50000.0}
-            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, 50000.0)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") in bot.state.positions
@@ -310,8 +344,7 @@ class TestExecuteTrade:
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
-            candle = {"close": 50000.0}
-            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, candle)
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, 50000.0)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") not in bot.state.positions
@@ -335,8 +368,7 @@ class TestExecuteTrade:
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
-            candle = {"close": 50000.0}
-            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, 50000.0)
 
             assert trade is None
 
@@ -364,8 +396,7 @@ class TestExecuteTrade:
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
-            candle = {"close": 50000.0}
-            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, candle)
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.BUY, 50000.0)
 
             assert trade is not None
             position = bot.state.positions[Symbol(value="BTC_USD")]
@@ -395,8 +426,7 @@ class TestExecuteTrade:
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
-            candle = {"close": 50000.0}
-            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, candle)
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, 50000.0)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") in bot.state.positions
@@ -419,8 +449,7 @@ class TestExecuteTrade:
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
-            candle = {"close": 50000.0}
-            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, candle)
+            trade = await bot._execute_trade(Symbol(value="BTC_USD"), Side.SELL, 50000.0)
 
             assert trade is not None
             assert Symbol(value="BTC_USD") not in bot.state.positions
@@ -475,70 +504,35 @@ class TestMainLoop:
 
     @pytest.mark.asyncio
     async def test_processes_single_candle(self, bot: NeatSwingBot) -> None:
-        """Main loop processes one candle and exits."""
-        candle = {
-            "symbol": "BTC_USD",
-            "close": 50000.0,
-            "open": 49000.0,
-            "high": 51000.0,
-            "low": 48500.0,
-            "volume": 1.5,
-        }
-        await bot.candle_queue.put(candle)
+        """Main loop processes one polling iteration and exits."""
+        bot.strategy.networks[Symbol(value="BTC_USD")] = MagicMock()
         bot._running = True
-
         call_count = 0
+        real_sleep = asyncio.sleep
 
-        async def fake_wait_for(coro, timeout=None):
+        async def short_sleep(*_):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
-                return await coro
-            # After first call, wait until bot stops then raise TimeoutError
-            while bot._running:
-                await asyncio.sleep(0.01)
-            raise TimeoutError()
+            if call_count >= 1:
+                bot._running = False
+            await real_sleep(0)
 
-        async def stop_after_process():
-            await asyncio.sleep(0.05)
-            bot._running = False
-
-        with patch("asyncio.wait_for", side_effect=fake_wait_for):
-            asyncio.create_task(stop_after_process())
-            await bot._main_loop()
-
-    @pytest.mark.asyncio
-    async def test_timeout_continues_loop(self, bot: NeatSwingBot) -> None:
-        """Timeout continues loop without error."""
-        bot._running = True
-
-        call_count = 0
-
-        async def fake_wait_for(coro, timeout=None):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise TimeoutError()
-            # After first timeout, wait until bot stops then raise again
-            while bot._running:
-                await asyncio.sleep(0.01)
-            raise TimeoutError()
-
-        async def stop_shortly():
-            await asyncio.sleep(0.05)
-            bot._running = False
-
-        with patch("asyncio.wait_for", side_effect=fake_wait_for):
-            asyncio.create_task(stop_shortly())
+        with patch(
+            "stonks_trading.bots.neat_swing.bot.asyncio.sleep",
+            side_effect=short_sleep,
+        ):
             await bot._main_loop()
 
     @pytest.mark.asyncio
     async def test_main_loop_executes_trade(
         self, bot: NeatSwingBot, mock_adapter: MagicMock
     ) -> None:
-        """Main loop processes candle, generates signal, and executes trade."""
+        """Main loop generates signal and executes trade."""
         bot.adapter = mock_adapter
         bot.strategy.networks[Symbol(value="BTC_USD")] = MagicMock()
+        bot._running = True
+        call_count = 0
+        real_sleep = asyncio.sleep
 
         fake_trade = MagicMock()
         fake_trade.quantity = 0.1
@@ -550,97 +544,52 @@ class TestMainLoop:
         fake_result.trade = fake_trade
         fake_result.error = None
 
-        with patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class:
+        async def short_sleep(*_):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                bot._running = False
+            await real_sleep(0)
+
+        with (
+            patch("stonks_trading.bots.neat_swing.bot.ExecuteBotTradeUseCase") as mock_uc_class,
+            patch(
+                "stonks_trading.bots.neat_swing.bot.asyncio.sleep",
+                side_effect=short_sleep,
+            ),
+            patch.object(bot, "persist_state", new_callable=AsyncMock),
+        ):
             mock_uc = MagicMock()
             mock_uc.execute = AsyncMock(return_value=fake_result)
             mock_uc_class.return_value = mock_uc
 
-            candle = {
-                "symbol": "BTC_USD",
-                "close": 50000.0,
-                "open": 49000.0,
-                "high": 51000.0,
-                "low": 48500.0,
-                "volume": 1.5,
-            }
-            await bot.candle_queue.put(candle)
-            bot._running = True
-
-            call_count = 0
-
-            async def fake_wait_for(coro, timeout=None):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    return await coro
-                while bot._running:
-                    await asyncio.sleep(0.01)
-                raise TimeoutError()
-
-            async def stop_after():
-                await asyncio.sleep(0.05)
-                bot._running = False
-
-            with (
-                patch("asyncio.wait_for", side_effect=fake_wait_for),
-                patch.object(bot, "persist_state", new_callable=AsyncMock),
-            ):
-                asyncio.create_task(stop_after())
-                await bot._main_loop()
+            await bot._main_loop()
 
         assert Symbol(value="BTC_USD") in bot.state.positions
 
     @pytest.mark.asyncio
     async def test_main_loop_exception_caught(self, bot: NeatSwingBot) -> None:
         """Exception in main loop is caught and logged."""
+        bot.strategy.networks[Symbol(value="BTC_USD")] = MagicMock()
+        bot._orchestrator.get_feature_computer.side_effect = ValueError("boom")
         bot._running = True
-
-        candle = {
-            "symbol": "BTC_USD",
-            "close": 50000.0,
-        }
-        await bot.candle_queue.put(candle)
-
         call_count = 0
-
-        async def fake_wait_for(coro, timeout=None):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                await coro
-                raise ValueError("boom")
-            while bot._running:
-                await asyncio.sleep(0.01)
-            raise TimeoutError()
-
-        async def stop_after():
-            await asyncio.sleep(0.08)
-            bot._running = False
-
-        # Patching asyncio.sleep globally (via module reference) would break
-        # event loop scheduling because AsyncMock doesn't yield. Use a tiny real
-        # sleep to keep the loop responsive while collapsing the 60s backoff.
         real_sleep = asyncio.sleep
 
-        async def quick_sleep(*args, **kwargs):
+        async def short_sleep(*_):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                bot._running = False
             await real_sleep(0)
 
         with (
-            patch("asyncio.wait_for", side_effect=fake_wait_for),
-            patch("stonks_trading.bots.neat_swing.bot.asyncio.sleep", side_effect=quick_sleep),
+            patch(
+                "stonks_trading.bots.neat_swing.bot.asyncio.sleep",
+                side_effect=short_sleep,
+            ),
             patch("stonks_trading.bots.neat_swing.bot.logger") as mock_logger,
         ):
-            asyncio.create_task(stop_after())
             await bot._main_loop()
 
         mock_logger.error.assert_called_once()
-
-
-class TestSetWebsocket:
-    """Tests for set_websocket."""
-
-    def test_set_websocket(self, bot: NeatSwingBot) -> None:
-        """set_websocket assigns the websocket attribute."""
-        fake_ws = MagicMock()
-        bot.set_websocket(fake_ws)
-        assert bot._websocket is fake_ws

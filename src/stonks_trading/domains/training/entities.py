@@ -108,3 +108,69 @@ class CheckpointRetentionPolicy:
         if self.retain_best and is_best:
             return True
         return generation % self.keep_every_nth == 0
+
+
+@dataclass
+class TrainingJob:
+    """Training job entity for Worker-delegated training.
+
+    Represents an async training job tracked via Redis.
+    This is ephemeral - not persisted to database.
+    """
+
+    job_id: str
+    symbol: str
+    status: str  # running, completed, failed, stopped, queued
+    generations_total: int
+    generations_completed: int = 0
+    best_fitness: float | None = None
+    best_roi: float | None = None
+    progress_pct: float = 0.0
+    checkpoint_dir: str | None = None
+    started_at: datetime | None = None
+    error: str | None = None
+    checkpoints: list[dict] = None
+
+    # Dual-winner metadata (matches NEAT/main.py final comparison)
+    all_time_best_model_id: int | None = None
+    all_time_best_roi: float | None = None
+    all_time_best_test_roi: float | None = None
+    last_winner_model_id: int | None = None
+    last_winner_roi: float | None = None
+    last_winner_test_roi: float | None = None
+    selected_winner: str | None = None
+
+    def __post_init__(self):
+        if self.checkpoints is None:
+            self.checkpoints = []
+
+    def is_running(self) -> bool:
+        return self.status == "running"
+
+    def is_completed(self) -> bool:
+        return self.status == "completed"
+
+    def is_failed(self) -> bool:
+        return self.status == "failed"
+
+
+@dataclass
+class StartTrainingRequest:
+    """Request to start training job (sent to Worker)."""
+
+    symbol: str
+    generations: int
+    population_size: int
+    training_capital: float
+    checkpoint_interval: int
+    strategy_type: str = "neat_swing"
+    csv_path: str | None = None
+
+
+@dataclass
+class StartTrainingResponse:
+    """Response from starting training job."""
+
+    job_id: str
+    status: str
+    started_at: datetime

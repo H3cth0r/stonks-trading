@@ -7,7 +7,9 @@ Complete guide for running the Stonks Trading API locally with Docker Compose.
 This setup provides:
 - **PostgreSQL** database (replaces Neon for local dev)
 - **MinIO** S3-compatible storage (replaces Tigris for local dev)
+- **Redis** cache and state management
 - **FastAPI** application with Tortoise ORM
+- **Bot Worker** process manager for bot subprocesses
 
 ## Prerequisites
 
@@ -25,9 +27,12 @@ docker-compose -f docker-compose.dev.yml up -d
 Services will be available at:
 - API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
+- Bot Worker: http://localhost:8001 (internal)
 - PostgreSQL: localhost:5432
+- Redis: localhost:6379
 - MinIO Console: http://localhost:9001 (login: minioadmin/minioadmin)
 - MinIO S3 API: localhost:9000
+- Dashboard: http://localhost:8501
 
 ## Database Initialization
 
@@ -114,13 +119,24 @@ postgresql://user:password@host:port/database
 
 ## Validation Steps
 
-### 1. Health Check
+### 1. Health Checks
+
+**API Health:**
 ```bash
 curl http://localhost:8000/health
 ```
 Expected response:
 ```json
 {"status": "healthy", "version": "0.1.0"}
+```
+
+**Worker Health:**
+```bash
+curl http://localhost:8001/health
+```
+Expected response:
+```json
+{"status": "ok", "service": "bot-worker"}
 ```
 
 ### 2. API Endpoints
@@ -142,11 +158,32 @@ curl -X POST http://localhost:8000/api/v1/signals/evaluate \
   -d '{"buy_prob":0.7,"sell_prob":0.3,"current_price":50000}'
 ```
 
-### 3. Run Integration Tests
+### 3. Bot Lifecycle Test
+
+```bash
+# Register a bot
+curl -X POST http://localhost:8000/api/v1/bots \
+  -H "Content-Type: application/json" \
+  -d '{"bot_type": "neat_swing", "instance_id": "test", "symbols": ["BTC_USD"], "mode": "dry_run"}'
+
+# Start bot (API delegates to Worker)
+curl -X POST http://localhost:8000/api/v1/bots/neat_swing/test/start \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "dry_run"}'
+
+# Check Worker logs
+docker-compose -f docker-compose.dev.yml logs -f bot-worker
+
+# Stop bot
+curl -X POST http://localhost:8000/api/v1/bots/neat_swing/test/stop
+```
+
+### 4. Run Integration Tests
 ```bash
 # Requires local venv with dependencies installed
 source .venv/bin/activate
 pytest tests/integration/test_api.py -v
+pytest tests/integration/test_bot_control_api.py -v
 ```
 
 ### 4. OpenAPI Documentation
@@ -186,6 +223,31 @@ Common causes:
 - Database URL scheme incorrect (must be `postgres://`)
 - PostgreSQL container not healthy yet (wait and restart)
 - Database tables not initialized (run `init_db.py`)
+- Worker container not healthy (API depends on Worker)
+
+### Worker Container Issues
+Check Worker logs:
+```bash
+docker-compose -f docker-compose.dev.yml logs bot-worker
+```
+
+Common causes:
+- Missing bot dependencies (NEAT, pandas)
+- Database connection failure
+- Port 8001 already in use
+
+### Bot Fails to Start
+If API returns error when starting bot:
+```bash
+# Check Worker health first
+curl http://localhost:8001/health
+
+# Check if bot is already running
+curl http://localhost:8000/api/v1/bots/running
+
+# View Worker logs for spawn errors
+docker-compose -f docker-compose.dev.yml logs -f bot-worker
+```
 
 ### Database "relation does not exist" Errors
 The schema hasn't been initialized. Run:
@@ -232,14 +294,24 @@ For production deployment:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Docker Network                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   API        │  │  PostgreSQL  │  │     MinIO        │  │
-│  │   Port 8000  │◄─┤  Port 5432   │  │  Port 9000/9001  │  │
-│  │   stonks-api │  │ stonks-post  │  │   stonks-minio   │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        Docker Network                             │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │   API        │◄──►│   Worker     │    │  PostgreSQL      │  │
+│  │   Port 8000  │HTTP│   Port 8001  │    │  Port 5432       │  │
+│  │   stonks-api │    │  stonks-bot  │    │  stonks-postgres │  │
+│  └──────────────┘    │   -worker    │    └──────────────────┘  │
+│                      └──────────────┘    ┌──────────────────┐  │
+│                           │              │     Redis        │  │
+│                      ┌────┴────┐         │   Port 6379      │  │
+│                      │  Bots   │         │   stonks-redis   │  │
+│                      │(subproc)│         └──────────────────┘  │
+│                      └─────────┘    ┌──────────────────────┐  │
+│                                     │     MinIO            │  │
+│                                     │  Port 9000/9001      │  │
+│                                     │   stonks-minio       │  │
+│                                     └──────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
          │
          ▼
    ┌──────────────┐
@@ -247,6 +319,13 @@ For production deployment:
    │  localhost   │
    └──────────────┘
 ```
+
+**Flow:**
+1. Dashboard/API calls API container endpoints
+2. API delegates bot operations to Worker via HTTP
+3. Worker spawns bot subprocesses (inside Worker container)
+4. Bots connect to PostgreSQL/Redis for state
+5. All containers share the same Docker network
 
 ## See Also
 

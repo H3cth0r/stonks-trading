@@ -4,27 +4,26 @@ Pure business logic, no I/O operations.
 All methods are deterministic and testable.
 """
 
-import asyncio
-import logging
-import os
 from datetime import datetime
 from typing import Any
 
 from stonks_trading.domains.botcontrol.entities import BotProcess, BotStatus, ProcessStatus
+from stonks_trading.domains.botcontrol.worker_client import WorkerHTTPClient
 from stonks_trading.domains.trading.value_objects import BotContext
-
-logger = logging.getLogger(__name__)
+from stonks_trading.shared.logger import logger
 
 
 class ProcessManager:
-    """Manages OS-level bot processes.
+    """Manages bot processes via Bot Worker container.
 
-    Handles spawning subprocesses, stopping them gracefully,
-    and checking process status via PID.
+    All bot operations are delegated to the Bot Worker container via HTTP API.
+    The API container never spawns subprocesses directly.
     """
 
-    # Track spawned processes for cleanup
-    _processes: dict[str, asyncio.subprocess.Process] = {}
+    def __init__(self):
+        """Initialize ProcessManager with Worker HTTP client."""
+        self._worker_client = WorkerHTTPClient()
+        logger.info("ProcessManager initialized (Worker mode)")
 
     async def start_bot(
         self,
@@ -34,7 +33,7 @@ class ProcessManager:
         mode: str,
         config_path: str,
     ) -> BotProcess:
-        """Spawn bot subprocess via asyncio.create_subprocess_exec.
+        """Start bot by delegating to Worker HTTP API.
 
         Args:
             bot_type: Type of bot (e.g., "neat_swing")
@@ -50,64 +49,35 @@ class ProcessManager:
             RuntimeError: If bot is already running or spawn fails
         """
         context_key = f"{bot_type}/{instance_id}"
-
-        # Check if already running in our tracking
-        if context_key in self._processes:
-            existing_process = self._processes[context_key]
-            if existing_process.returncode is None:
-                raise RuntimeError(
-                    f"Bot {context_key} is already running (PID: {existing_process.pid})"
-                )
-            else:
-                # Process has finished, remove it
-                del self._processes[context_key]
-
-        # Build command
-        cmd = [
-            "python",
-            "-m",
-            f"stonks_trading.bots.{bot_type}",
-            "--symbols",
-            *symbols,
-            "--mode",
-            mode,
-            "--instance-id",
-            instance_id,
-            "--config-path",
-            config_path,
-        ]
-
-        logger.info(f"Starting bot {context_key} with command: {' '.join(cmd)}")
+        logger.info(f"Delegating bot {context_key} start to Worker via HTTP")
 
         try:
-            # Spawn subprocess
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            response = await self._worker_client.start_bot(
+                bot_type=bot_type,
+                instance_id=instance_id,
+                symbols=symbols,
+                mode=mode,
+                config_path=config_path,
             )
 
-            # Store for tracking
-            self._processes[context_key] = process
-
-            # Create BotProcess entity
+            # Convert response to BotProcess
             bot_process = BotProcess(
                 bot_type=bot_type,
                 bot_instance_id=instance_id,
                 mode=mode,
                 symbols=symbols,
-                pid=process.pid,
+                pid=response.pid,
                 status=ProcessStatus.STARTING,
-                started_at=datetime.utcnow(),
+                started_at=response.started_at,
                 config_path=config_path,
             )
 
-            logger.info(f"Started bot {context_key} with PID {process.pid}")
+            logger.info(f"Worker started bot {context_key} with PID {response.pid}")
             return bot_process
 
         except Exception as e:
-            logger.error(f"Failed to start bot {context_key}: {e}")
-            raise RuntimeError(f"Failed to start bot: {e}") from e
+            logger.error(f"Worker failed to start bot {context_key}: {e}")
+            raise RuntimeError(f"Worker failed to start bot: {e}") from e
 
     async def stop_bot(
         self,
@@ -115,95 +85,61 @@ class ProcessManager:
         graceful: bool = True,
         timeout_seconds: int = 30,
     ) -> tuple[ProcessStatus, int | None, str | None]:
-        """Stop bot subprocess.
+        """Stop bot by delegating to Worker HTTP API.
 
         Args:
             context: BotContext identifying the bot
-            graceful: If True, send SIGTERM first, then SIGKILL if needed
-            timeout_seconds: Seconds to wait for graceful shutdown
+            graceful: If True, Worker sends SIGTERM first, then SIGKILL if needed
+            timeout_seconds: Seconds to wait for graceful shutdown (handled by Worker)
 
         Returns:
             Tuple of (final_status, exit_code, error_message)
         """
         context_key = f"{context.bot_type}/{context.instance_id}"
+        logger.info(f"Delegating bot {context_key} stop to Worker via HTTP")
 
-        # Check our process tracking first
-        if context_key in self._processes:
-            process = self._processes[context_key]
+        try:
+            response = await self._worker_client.stop_bot(
+                bot_type=context.bot_type,
+                instance_id=context.instance_id,
+                graceful=graceful,
+            )
 
-            if process.returncode is not None:
-                # Already stopped
-                del self._processes[context_key]
-                return ProcessStatus.STOPPED, process.returncode, None
+            # Map response status to ProcessStatus
+            try:
+                status = ProcessStatus(response.status)
+            except ValueError:
+                status = ProcessStatus.STOPPED
 
-            # Try graceful shutdown
-            if graceful:
-                try:
-                    process.terminate()  # SIGTERM
-                    logger.info(f"Sent SIGTERM to bot {context_key} (PID: {process.pid})")
+            return status, response.exit_code, response.message
 
-                    # Wait for graceful shutdown
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
-                        del self._processes[context_key]
-                        return ProcessStatus.STOPPED, process.returncode, None
-                    except TimeoutError:
-                        logger.warning(
-                            f"Bot {context_key} did not stop gracefully, sending SIGKILL"
-                        )
-                        process.kill()  # SIGKILL
-                        await process.wait()
-                        del self._processes[context_key]
-                        return ProcessStatus.STOPPED, process.returncode, "Killed after timeout"
-
-                except ProcessLookupError:
-                    # Process already gone
-                    del self._processes[context_key]
-                    return ProcessStatus.STOPPED, None, None
-            else:
-                # Immediate kill
-                process.kill()
-                await process.wait()
-                del self._processes[context_key]
-                return ProcessStatus.STOPPED, process.returncode, "Killed immediately"
-
-        # Check if process exists via PID (from database record)
-        # This is handled by the caller with the process record
-        return ProcessStatus.UNKNOWN, None, "Process not tracked locally"
+        except Exception as e:
+            logger.error(f"Worker failed to stop bot {context_key}: {e}")
+            return ProcessStatus.ERROR, None, str(e)
 
     async def get_process_status(
         self,
         context: BotContext,
         pid: int | None,
     ) -> ProcessStatus:
-        """Check if process is alive via pid check.
+        """Check if process is alive.
+
+        In Worker architecture, status is tracked via database
+        and Worker health checks. Direct PID checks are not available.
 
         Args:
             context: BotContext identifying the bot
-            pid: OS process ID to check
+            pid: OS process ID (not used in Worker mode, kept for interface)
 
         Returns:
-            RUNNING if alive, STOPPED if dead, UNKNOWN if no PID
+            UNKNOWN (Worker manages actual process status)
         """
+        # Worker manages subprocesses - status comes from database records
+        # This method is kept for interface compatibility but returns UNKNOWN
         if pid is None:
             return ProcessStatus.UNKNOWN
 
-        context_key = f"{context.bot_type}/{context.instance_id}"
-
-        # Check our tracking first
-        if context_key in self._processes:
-            process = self._processes[context_key]
-            if process.returncode is None:
-                return ProcessStatus.RUNNING
-            else:
-                return ProcessStatus.STOPPED
-
-        # Check via os.kill with signal 0 (doesn't actually send signal)
-        try:
-            os.kill(pid, 0)
-            return ProcessStatus.RUNNING
-        except (OSError, ProcessLookupError):
-            return ProcessStatus.STOPPED
+        return ProcessStatus.UNKNOWN
 
     async def cleanup_stale_processes(
         self,
@@ -211,46 +147,78 @@ class ProcessManager:
     ) -> list[BotProcess]:
         """Mark processes as ERROR if their PID is dead.
 
+        Worker handles stale process cleanup internally.
+        API layer should query Worker health for actual status.
+
         Args:
             stale_processes: List of processes to check
 
         Returns:
-            List of processes that were marked stale
+            Empty list (Worker handles this)
         """
-        cleaned = []
-
-        for process in stale_processes:
-            if process.pid is not None:
-                actual_status = await self.get_process_status(
-                    BotContext(
-                        bot_type=process.bot_type,
-                        instance_id=process.bot_instance_id,
-                    ),
-                    process.pid,
-                )
-
-                if actual_status == ProcessStatus.STOPPED:
-                    process.status = ProcessStatus.ERROR
-                    process.error_message = "Process died unexpectedly"
-                    cleaned.append(process)
-
-        return cleaned
+        # Worker handles stale process cleanup
+        return []
 
     @classmethod
     def is_process_running(cls, pid: int) -> bool:
-        """Static method to check if a process is running.
+        """Check if a process is running.
 
         Args:
             pid: Process ID to check
 
         Returns:
-            True if process exists
+            False (Worker manages processes, not API)
         """
+        # Worker manages processes - API doesn't have direct visibility
+        return False
+
+    async def kill_process_immediately(
+        self,
+        context: BotContext,
+        pid: int | None,
+    ) -> None:
+        """Kill process immediately by delegating to Worker.
+
+        Args:
+            context: BotContext identifying the bot
+            pid: Process ID (not used in Worker mode, kept for interface)
+        """
+        context_key = f"{context.bot_type}/{context.instance_id}"
+        logger.warning(f"Delegating immediate kill for bot {context_key} to Worker")
+
         try:
-            os.kill(pid, 0)
-            return True
-        except (OSError, ProcessLookupError):
-            return False
+            await self._worker_client.stop_bot(
+                bot_type=context.bot_type,
+                instance_id=context.instance_id,
+                graceful=False,
+            )
+        except Exception as e:
+            logger.error(f"Worker failed to kill bot {context_key}: {e}")
+
+    async def clear_bot_state(self, context: BotContext) -> None:
+        """Clear bot state from Redis.
+
+        Args:
+            context: BotContext identifying the bot
+        """
+        from stonks_trading.shared.redis_client import get_redis
+
+        redis = await get_redis()
+        context_key = f"{context.bot_type}/{context.instance_id}"
+
+        # Clear state keys
+        keys_to_delete = [
+            f"bot:state:{context_key}",
+            f"equity:history:{context_key}",
+        ]
+
+        for key in keys_to_delete:
+            try:
+                await redis.delete(key)
+            except Exception:
+                pass
+
+        logger.info(f"Cleared state for bot {context_key}")
 
 
 class BotStatusAssembler:

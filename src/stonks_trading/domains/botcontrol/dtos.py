@@ -98,3 +98,33 @@ class ErrorResponse(BaseModel):
 
     detail: str = Field(..., description="Error message")
     error_code: str | None = Field(None, description="Optional error code")
+
+
+class DeleteBotResponse(BaseModel):
+    """Response after deleting a bot."""
+
+    bot_type: str = Field(..., description="Bot type identifier")
+    bot_instance_id: str = Field(..., description="Bot instance ID")
+    deleted: bool = Field(..., description="Whether deletion was successful")
+    message: str = Field(..., description="Status message")
+
+
+class EmergencyStopRequest(BaseModel):
+    """Request for emergency stop."""
+
+    close_positions: bool = Field(
+        default=True, description="Whether to close open positions"
+    )
+    order_type: str = Field(default="market", description="Order type for closing positions")
+
+
+class EmergencyStopResponse(BaseModel):
+    """Response after emergency stop."""
+
+    bot_type: str = Field(..., description="Bot type identifier")
+    bot_instance_id: str = Field(..., description="Bot instance ID")
+    status: str = Field(default="emergency_stopped", description="Bot status")
+    positions_closed: int = Field(default=0, description="Number of positions closed")
+    orders_cancelled: int = Field(default=0, description="Number of orders cancelled")
+    final_equity: float | None = Field(None, description="Final equity value")
+    message: str = Field(..., description="Status message")

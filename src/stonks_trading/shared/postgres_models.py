@@ -118,6 +118,7 @@ class GenomeModel(Model):
     symbol = fields.CharField(max_length=20, index=True)
     genome_data = fields.BinaryField(null=True)
     model_family = fields.CharField(max_length=50, default="NEAT_RNN_V1")
+    generation = fields.IntField(default=0)
     artifact_uri = fields.CharField(max_length=500, null=True)
     trainer_git_sha = fields.CharField(max_length=40, null=True)
     feature_schema_id = fields.CharField(max_length=64, null=True)

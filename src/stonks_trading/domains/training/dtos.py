@@ -186,3 +186,135 @@ class TriggerRetrainingResponse(BaseResponse):
     job_id: str
     results: list[dict[str, Any]] = Field(default_factory=list)
     completed_at: datetime
+
+
+# =============================================================================
+# Async Training Job DTOs (Phase 10C)
+# =============================================================================
+
+
+class TrainingCheckpointResponse(BaseResponse):
+    """Training checkpoint response."""
+
+    generation: int
+    model_id: str
+    fitness: float
+    roi: float | None = None
+    created_at: datetime
+
+
+class TrainingJobRequest(BaseModel):
+    """Request to start async training job."""
+
+    symbol: str = Field(..., min_length=1, max_length=20)
+    generations: int = Field(default=30, ge=1, le=100)
+    population_size: int = Field(default=150, ge=10, le=500)
+    training_capital: float = Field(default=10000.0, ge=1000)
+    checkpoint_interval: int = Field(default=5, ge=1, le=10)
+    strategy_type: str = Field(default="neat_swing", min_length=1, max_length=50)
+    csv_path: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+        description="Optional CSV path to load training data exactly like NEAT/main.py",
+    )
+
+
+class TrainingJobResponse(BaseResponse):
+    """Async training job response."""
+
+    job_id: str
+    symbol: str
+    status: str  # queued | running | completed | failed
+    generations_total: int
+    generations_completed: int = 0
+    best_fitness: float | None = None
+    best_roi: float | None = None  # all-time-best validation ROI (backwards compat)
+    progress_pct: float = 0.0
+    started_at: datetime | None = None
+    estimated_completion: datetime | None = None
+
+    # Dual-winner metadata (matches NEAT/main.py final comparison)
+    all_time_best_model_id: int | None = None
+    all_time_best_roi: float | None = None
+    all_time_best_test_roi: float | None = None
+    last_winner_model_id: int | None = None
+    last_winner_roi: float | None = None  # validation ROI of last-generation winner
+    last_winner_test_roi: float | None = None
+    selected_winner: str | None = None  # "all_time_best" or "last_winner"
+
+
+class TrainingJobDetailResponse(TrainingJobResponse):
+    """Detailed training job response with checkpoints."""
+
+    checkpoints: list[TrainingCheckpointResponse] = Field(default_factory=list)
+    current_plot: str | None = None  # Plotly HTML or data URL
+
+
+class TrainingJobListResponse(BaseResponse):
+    """List of training jobs."""
+
+    jobs: list[TrainingJobResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class TrainingJobStopResponse(BaseResponse):
+    """Response after stopping a training job."""
+
+    job_id: str
+    status: str  # stopped | failed
+    message: str | None = None
+
+
+class SelectCheckpointRequest(BaseModel):
+    """Request to select checkpoint for deployment."""
+
+    generation: int = Field(..., ge=0)
+
+
+class SelectCheckpointResponse(BaseResponse):
+    """Response after selecting checkpoint."""
+
+    job_id: str
+    generation: int
+    model_id: str
+    activated: bool
+    message: str
+
+
+class WinnerActivationRequest(BaseModel):
+    """Request to activate a final winner genome from a training job."""
+
+    winner: str = Field(..., pattern=r"^(all_time_best|last_winner)$")
+    bot_type: str = Field(default="neat_swing", min_length=1, max_length=50)
+    bot_instance_id: str = Field(default="default", min_length=1, max_length=100)
+
+
+class WinnerActivationResponse(BaseResponse):
+    """Response after activating a final winner genome."""
+
+    job_id: str
+    winner: str
+    model_id: int
+    activated: bool
+    message: str
+
+
+class TrainingPlotResponse(BaseResponse):
+    """Training plot response with Plotly HTML."""
+
+    job_id: str
+    plot_html: str
+    generation: int | None = None  # If specific checkpoint, else None for current
+    fitness: float | None = None
+    created_at: datetime | None = None
+
+
+class TrainingProgressPlotResponse(BaseResponse):
+    """Training progress plot response."""
+
+    job_id: str
+    plot_data: dict[str, Any]  # Plotly JSON data for rendering
+    generations: list[int] = Field(default_factory=list)
+    fitness_values: list[float] = Field(default_factory=list)
+    updated_at: datetime
