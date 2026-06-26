@@ -565,6 +565,13 @@ async def list_training_jobs_endpoint(
                         "progress_pct": job_data.get("progress_pct"),
                         "started_at": job_data.get("started_at"),
                         "checkpoints": job_data.get("checkpoints", []),
+                        "all_time_best_model_id": job_data.get("all_time_best_model_id"),
+                        "all_time_best_roi": job_data.get("all_time_best_roi"),
+                        "all_time_best_test_roi": job_data.get("all_time_best_test_roi"),
+                        "last_winner_model_id": job_data.get("last_winner_model_id"),
+                        "last_winner_roi": job_data.get("last_winner_roi"),
+                        "last_winner_test_roi": job_data.get("last_winner_test_roi"),
+                        "selected_winner": job_data.get("selected_winner"),
                     }
                 )
 
@@ -617,6 +624,13 @@ async def get_training_job_endpoint(
         started_at=job_data.started_at,
         checkpoints=checkpoints,
         current_plot=None,
+        all_time_best_model_id=job_data.all_time_best_model_id,
+        all_time_best_roi=job_data.all_time_best_roi,
+        all_time_best_test_roi=job_data.all_time_best_test_roi,
+        last_winner_model_id=job_data.last_winner_model_id,
+        last_winner_roi=job_data.last_winner_roi,
+        last_winner_test_roi=job_data.last_winner_test_roi,
+        selected_winner=job_data.selected_winner,
     )
 
 

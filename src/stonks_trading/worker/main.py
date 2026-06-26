@@ -331,6 +331,13 @@ def get_worker_router() -> APIRouter:
                 "checkpoint_dir": str(checkpoint_dir),
                 "started_at": datetime.utcnow().isoformat(),
                 "error": None,
+                "all_time_best_model_id": None,
+                "all_time_best_roi": None,
+                "all_time_best_test_roi": None,
+                "last_winner_model_id": None,
+                "last_winner_roi": None,
+                "last_winner_test_roi": None,
+                "selected_winner": None,
             }
 
             redis = await get_redis()

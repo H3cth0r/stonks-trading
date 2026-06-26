@@ -3,15 +3,19 @@
 Called by Worker as subprocess via:
     python -m stonks_trading.worker.training_subprocess --job-id ...
 
-Mirrors: bots/neat_swing/runner.py
+Mirrors: bots/neat_swing/runner.py and NEAT/main.py
 
 Responsibilities:
 1. Parse CLI arguments (job config)
-2. Load data via TrainingDataProvider (80/20 split from DuckDB)
-3. Run NEAT training via NeatTrainer
-4. Save checkpoints to disk (/app/data/training/{job_id}/)
-5. Update Redis with progress (shared state)
-6. Save final genome to PostgreSQL via save_genome()
+2. Load data via TrainingDataProvider (80/20 split from DuckDB) by default
+3. Optionally load data from CSV to replicate NEAT/main.py exactly
+4. Run NEAT training via NeatTrainer
+5. Save checkpoints to disk (/app/data/training/{job_id}/)
+6. Update Redis with progress (shared state)
+7. Save final genomes to PostgreSQL via save_genome()
+   - all-time-best genome (highest validation ROI)
+   - last-generation winner (NEAT population.run() result)
+8. Evaluate both winners on the test split and compare them
 
 Required Environment:
 - /app/data directory writable (shared volume)
@@ -37,7 +41,10 @@ from plotly.subplots import make_subplots
 from stonks_trading.domains.strategies.neat_swing.config import create_default_config
 from stonks_trading.domains.strategies.neat_swing.features import load_and_engineer
 from stonks_trading.domains.strategies.neat_swing.trading_env import TradingEnv
-from stonks_trading.domains.strategies.neat_swing.trainer import NeatTrainer
+from stonks_trading.domains.strategies.neat_swing.trainer import (
+    NeatTrainer,
+    evaluate_genome_on_data,
+)
 from stonks_trading.domains.trading.entities import Genome
 from stonks_trading.domains.trading.value_objects import Symbol
 from stonks_trading.domains.training.repositories import save_genome
@@ -58,16 +65,15 @@ async def _ensure_tortoise_initialized() -> None:
         _tortoise_initialized = True
 
 
-
-
 def _update_job_in_redis(
     job_id: str,
     generations: int | None,
-    checkpoints: list[dict],
+    checkpoints: list[dict[str, Any]],
     best_fitness: float,
     best_roi: float,
     status: str,
     progress_pct: float | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     """Write a consolidated job update to Redis synchronously.
 
@@ -90,12 +96,20 @@ def _update_job_in_redis(
     job_data["best_fitness"] = best_fitness
     job_data["best_roi"] = best_roi
     job_data["status"] = status
-    if progress_pct is not None:
+    if status == "completed" and generations is not None:
+        # Ensure the final response reflects the requested generation total,
+        # not just the last checkpoint generation (e.g. interval 5 -> 25 of 30).
+        job_data["generations_completed"] = generations
+        job_data["progress_pct"] = 100.0
+    elif progress_pct is not None:
         job_data["progress_pct"] = progress_pct
     elif generations is not None and generations > 0:
         job_data["progress_pct"] = (last_gen / generations) * 100
     # If generations is None, leave existing progress_pct unchanged.
     job_data["checkpoints"] = checkpoints
+
+    if extra:
+        job_data.update(extra)
 
     redis.setex(
         f"training:job:{job_id}",
@@ -127,9 +141,9 @@ class RedisReporter(neat.reporting.BaseReporter):
         self.checkpoint_interval = checkpoint_interval
         self.gen = 0
         self.best_all_time_roi = -float("inf")
-        self.best_all_time_genome = None
-        self.best_all_time_config = None
-        self.checkpoints: list[dict] = []
+        self.best_all_time_genome: neat.DefaultGenome | None = None
+        self.best_all_time_config: neat.Config | None = None
+        self.checkpoints: list[dict[str, Any]] = []
 
     def start_generation(self, generation: int) -> None:
         self.gen = generation
@@ -145,9 +159,9 @@ class RedisReporter(neat.reporting.BaseReporter):
         net = neat.nn.RecurrentNetwork.create(best_genome, config)
         env = TradingEnv(self.validation_data)
 
-        hist_eq = []
-        hist_cash = []
-        hist_holdings = []
+        hist_eq: list[float] = []
+        hist_cash: list[float] = []
+        hist_holdings: list[float] = []
         for i in range(len(self.validation_data)):
             inputs = env.get_state(i)
             action = net.activate(inputs)
@@ -211,7 +225,7 @@ class RedisReporter(neat.reporting.BaseReporter):
         holdings: list[float],
         env: Any,
         trades: list,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Create checkpoint data dict."""
         trades_dicts = [
             {
@@ -238,7 +252,7 @@ class RedisReporter(neat.reporting.BaseReporter):
 
     def _save_checkpoint_files(
         self,
-        checkpoint: dict,
+        checkpoint: dict[str, Any],
         genome: neat.DefaultGenome,
         config: neat.Config,
     ) -> None:
@@ -336,6 +350,161 @@ class RedisReporter(neat.reporting.BaseReporter):
         return fig.to_html(full_html=False, include_plotlyjs="cdn")
 
 
+def _evaluate_genome_on_test_data(
+    genome: neat.DefaultGenome,
+    config: neat.Config,
+    test_data: pd.DataFrame,
+    initial_capital: float,
+    label: str,
+    checkpoint_dir: Path,
+) -> tuple[float, float, int, float]:
+    """Evaluate a genome on the test split and save a plot.
+
+    Returns:
+        Tuple of (test_roi_pct, final_equity, total_trades, max_drawdown)
+    """
+    results = evaluate_genome_on_data(
+        genome,
+        config,
+        test_data,
+        initial_capital=initial_capital,
+        fee_rate=0.001,
+        decision_threshold=0.6,
+        min_trade_interval=15,
+        verbose=False,
+    )
+
+    test_roi = results["final_roi_pct"]
+    final_equity = results["final_equity"]
+    total_trades = results["total_trades"]
+    max_drawdown = results["max_drawdown"]
+
+    # Generate plot for this genome on test data
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        subplot_titles=("Equity vs Buy&Hold", "Cash", "Holdings Value"),
+    )
+
+    bh = (test_data["Close"] / test_data.iloc[0]["Close"]) * initial_capital
+    fig.add_trace(
+        go.Scatter(
+            x=test_data.index, y=bh, name="Buy & Hold", line={"color": "gray", "dash": "dot"}
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=test_data.index,
+            y=results["equity_curve"],
+            name=f"Strategy ({label})",
+            line={"color": "purple"},
+        ),
+        row=1,
+        col=1,
+    )
+
+    buys = [t for t in results["trades"] if t.trade_type == "buy"]
+    sells = [t for t in results["trades"] if t.trade_type == "sell"]
+    if buys:
+        fig.add_trace(
+            go.Scatter(
+                x=[t.timestamp for t in buys],
+                y=[results["equity_curve"][t.step] for t in buys],
+                mode="markers",
+                marker={"symbol": "triangle-up", "color": "lime", "size": 8},
+                name="Buy",
+            ),
+            row=1,
+            col=1,
+        )
+    if sells:
+        fig.add_trace(
+            go.Scatter(
+                x=[t.timestamp for t in sells],
+                y=[results["equity_curve"][t.step] for t in sells],
+                mode="markers",
+                marker={"symbol": "triangle-down", "color": "red", "size": 8},
+                name="Sell",
+            ),
+            row=1,
+            col=1,
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=test_data.index,
+            y=results["cash_curve"],
+            name="Cash",
+            line={"color": "green"},
+            fill="tozeroy",
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=test_data.index,
+            y=results["holdings_curve"],
+            name="Holdings",
+            line={"color": "orange"},
+            fill="tozeroy",
+        ),
+        row=3,
+        col=1,
+    )
+
+    fig.update_layout(
+        title=f"Final Test Report - {label}",
+        template="plotly_dark",
+        height=1000,
+    )
+
+    plot_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+    plot_file = checkpoint_dir / f"test_{label.lower().replace(' ', '_')}_plot.html"
+    plot_file.write_text(plot_html)
+
+    logger.info(
+        f"Test evaluation for {label}: ROI={test_roi:.2f}%, trades={total_trades}, "
+        f"max_dd={max_drawdown*100:.2f}%"
+    )
+    return test_roi, final_equity, total_trades, max_drawdown
+
+
+async def _persist_genome(
+    genome: neat.DefaultGenome,
+    config: neat.Config,
+    symbol: str,
+    generation: int,
+    roi_validation: float,
+    roi_test: float | None,
+    total_return: float,
+    model_family: str,
+    trained_at: datetime,
+    num_trades: int = 0,
+    max_drawdown: float = 0.0,
+) -> Genome:
+    """Persist a genome to PostgreSQL and return the saved entity."""
+    genome_bytes = pickle.dumps((genome, config))
+    entity = Genome(
+        genome_data=genome_bytes,
+        fitness=genome.fitness or 0.0,
+        generation=generation,
+        symbol=Symbol(value=symbol),
+        roi_validation=roi_validation,
+        roi_test=roi_test,
+        total_return=total_return,
+        trades_count=num_trades,
+        max_drawdown=max_drawdown,
+        is_active=False,
+        model_family=model_family,
+        trained_at=trained_at,
+    )
+    return await save_genome(entity)
+
 
 async def run_training(
     job_id: str,
@@ -348,12 +517,24 @@ async def run_training(
     strategy_type: str,
     csv_path: str | None = None,
 ) -> None:
-    """Run NEAT training and save results."""
+    """Run NEAT training and save results.
+
+    By default, loads data from DuckDB (the stored market data). If csv_path is
+    provided, loads from CSV exactly like NEAT/main.py for parity runs.
+
+    Persists both the all-time-best genome (highest validation ROI) and the
+    last-generation winner (population.run() result) to PostgreSQL, evaluates
+    both on the test split, and saves test plots.
+    """
     try:
         # Initialize Tortoise ORM before any DB operations
         await _ensure_tortoise_initialized()
 
-        logger.info(f"Starting training {job_id} for {symbol}", csv_path=csv_path)
+        logger.info(
+            f"Starting training {job_id} for {symbol}",
+            csv_path=csv_path,
+            data_source="CSV" if csv_path else "DuckDB",
+        )
 
         if csv_path:
             # Load data exactly like NEAT/main.py for parity runs.
@@ -362,22 +543,27 @@ async def run_training(
                 f"Loaded CSV data from {csv_path}: {len(train_df)} train rows, {len(test_df)} test rows"
             )
         else:
+            # Default: use the DuckDB market data we are capturing.
             data_provider = TrainingDataProvider()
             train_df, test_df = await data_provider.fetch_all_available_data(symbol)
-            logger.info(f"Loaded DuckDB data: {len(train_df)} train rows, {len(test_df)} test rows")
+            logger.info(
+                f"Loaded DuckDB data: {len(train_df)} train rows, {len(test_df)} test rows"
+            )
 
         config = create_default_config()
         config.pop_size = population_size
 
         # Validation slice must match NEAT/main.py exactly:
         # val_slice = train.iloc[-EPISODE_STEPS:]
-        # Using test_df here was the main parity bug.
         episode_steps = 20160
         val_slice = train_df.iloc[-episode_steps:]
 
+        checkpoint_path = Path(checkpoint_dir)
+        checkpoint_path.mkdir(parents=True, exist_ok=True)
+
         reporter = RedisReporter(
             job_id=job_id,
-            checkpoint_dir=Path(checkpoint_dir),
+            checkpoint_dir=checkpoint_path,
             validation_data=val_slice,
             generations_total=generations,
             checkpoint_interval=checkpoint_interval,
@@ -390,36 +576,156 @@ async def run_training(
             episode_steps=episode_steps,
         )
 
-        trainer.train(generations=generations, reporters=[reporter])
+        # NEAT main.py returns the last-generation winner.
+        last_winner = trainer.train(generations=generations, reporters=[reporter])
 
+        trained_at = datetime.utcnow()
+
+        # ------------------------------------------------------------------
         # Persist the all-time-best genome (highest validation ROI), matching
         # NEAT/main.py which saves best_all_time.pkl separately from the last
         # generation winner.
-        if reporter.best_all_time_genome is not None:  # type: ignore[unreachable]
+        # ------------------------------------------------------------------
+        all_time_best_id: int | None = None
+        all_time_best_test_roi: float | None = None
+        if reporter.best_all_time_genome is not None and reporter.best_all_time_config is not None:
             best_gen = reporter.best_all_time_genome
             best_config = reporter.best_all_time_config
-            best_fitness = best_gen.fitness or 0.0
-            best_roi = reporter.best_all_time_roi
+            best_validation_roi = reporter.best_all_time_roi
 
-            genome_bytes = pickle.dumps((best_gen, best_config))
-            genome_entity = Genome(
-                genome_data=genome_bytes,
-                fitness=best_fitness,
+            all_time_best_trades = 0
+            all_time_best_drawdown = 0.0
+            if test_df is not None and len(test_df) > 0:
+                (
+                    all_time_best_test_roi,
+                    _,
+                    all_time_best_trades,
+                    all_time_best_drawdown,
+                ) = _evaluate_genome_on_test_data(
+                    genome=best_gen,
+                    config=best_config,
+                    test_data=test_df,
+                    initial_capital=training_capital,
+                    label="All_Time_Best",
+                    checkpoint_dir=checkpoint_path,
+                )
+
+            saved_all_time_best = await _persist_genome(
+                genome=best_gen,
+                config=best_config,
+                symbol=symbol,
                 generation=generations,
-                symbol=Symbol(value=symbol),
-                roi_validation=best_roi,
-                total_return=best_roi / 100,
-                is_active=False,
-                model_family="NEAT_RNN_V1",
-                trained_at=datetime.utcnow(),
+                roi_validation=best_validation_roi,
+                roi_test=all_time_best_test_roi,
+                total_return=best_validation_roi / 100,
+                model_family="NEAT_RNN_V1_ALL_TIME_BEST",
+                trained_at=trained_at,
+                num_trades=all_time_best_trades,
+                max_drawdown=all_time_best_drawdown,
             )
-            saved = await save_genome(genome_entity)
+            all_time_best_id = saved_all_time_best.id
             logger.info(
-                f"Saved all-time-best genome {saved.id} from job {job_id} "
-                f"(fitness={best_fitness:.2f}, roi={best_roi:.2f}%)"
+                f"Saved all-time-best genome {all_time_best_id} from job {job_id} "
+                f"(fitness={saved_all_time_best.fitness:.2f}, "
+                f"val_roi={best_validation_roi:.2f}%, "
+                f"test_roi={all_time_best_test_roi or 0.0:.2f}%)"
             )
+
+        # ------------------------------------------------------------------
+        # Persist the last-generation winner, like NEAT/main.py last_winner.pkl.
+        # ------------------------------------------------------------------
+        last_winner_id: int | None = None
+        last_winner_test_roi: float | None = None
+        last_winner_validation_roi: float | None = None
+        if last_winner is not None:
+            # Evaluate last-generation winner on validation slice for comparison.
+            last_val_results = evaluate_genome_on_data(
+                last_winner,
+                config,
+                val_slice,
+                initial_capital=training_capital,
+                fee_rate=0.001,
+                decision_threshold=0.6,
+                min_trade_interval=15,
+                verbose=False,
+            )
+            last_winner_validation_roi = last_val_results["final_roi_pct"]
+
+            last_winner_trades = 0
+            last_winner_drawdown = 0.0
+            if test_df is not None and len(test_df) > 0:
+                (
+                    last_winner_test_roi,
+                    _,
+                    last_winner_trades,
+                    last_winner_drawdown,
+                ) = _evaluate_genome_on_test_data(
+                    genome=last_winner,
+                    config=config,
+                    test_data=test_df,
+                    initial_capital=training_capital,
+                    label="Last_Winner",
+                    checkpoint_dir=checkpoint_path,
+                )
+
+            saved_last_winner = await _persist_genome(
+                genome=last_winner,
+                config=config,
+                symbol=symbol,
+                generation=generations,
+                roi_validation=last_winner_validation_roi,
+                roi_test=last_winner_test_roi,
+                total_return=last_winner_validation_roi / 100,
+                model_family="NEAT_RNN_V1_LAST_WINNER",
+                trained_at=trained_at,
+                num_trades=last_winner_trades,
+                max_drawdown=last_winner_drawdown,
+            )
+            last_winner_id = saved_last_winner.id
+            logger.info(
+                f"Saved last-generation winner genome {last_winner_id} from job {job_id} "
+                f"(fitness={saved_last_winner.fitness:.2f}, "
+                f"val_roi={last_winner_validation_roi:.2f}%, "
+                f"test_roi={last_winner_test_roi or 0.0:.2f}%)"
+            )
+
+        # ------------------------------------------------------------------
+        # Final comparison, mirroring NEAT/main.py:477-494.
+        # ------------------------------------------------------------------
+        selected_winner = None
+        if (
+            all_time_best_test_roi is not None
+            and last_winner_test_roi is not None
+            and last_winner_id is not None
+            and all_time_best_id is not None
+        ):
+            if all_time_best_test_roi > last_winner_test_roi:
+                selected_winner = "all_time_best"
+                logger.info(
+                    f"The All-Time Best genome performed better on test data: "
+                    f"{all_time_best_test_roi:.2f}% vs {last_winner_test_roi:.2f}%"
+                )
+            else:
+                selected_winner = "last_winner"
+                logger.info(
+                    f"The Last Generation winner performed better on test data: "
+                    f"{last_winner_test_roi:.2f}% vs {all_time_best_test_roi:.2f}%"
+                )
+        elif all_time_best_id is not None:
+            selected_winner = "all_time_best"
+        elif last_winner_id is not None:
+            selected_winner = "last_winner"
 
         # Final synchronous Redis update after training finishes.
+        extra = {
+            "all_time_best_model_id": all_time_best_id,
+            "all_time_best_roi": reporter.best_all_time_roi,
+            "all_time_best_test_roi": all_time_best_test_roi,
+            "last_winner_model_id": last_winner_id,
+            "last_winner_roi": last_winner_validation_roi,
+            "last_winner_test_roi": last_winner_test_roi,
+            "selected_winner": selected_winner,
+        }
         _update_job_in_redis(
             job_id=job_id,
             generations=generations,
@@ -430,6 +736,7 @@ async def run_training(
             best_roi=reporter.best_all_time_roi,
             status="completed",
             progress_pct=100.0,
+            extra=extra,
         )
 
         logger.info(f"Training job {job_id} completed successfully")

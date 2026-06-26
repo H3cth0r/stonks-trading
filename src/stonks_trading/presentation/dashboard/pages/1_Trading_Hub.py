@@ -200,9 +200,9 @@ with tab_training:
             "Training Capital ($)",
             min_value=1000.0,
             max_value=1000000.0,
-            value=100000.0,
-            step=10000.0,
-            help="Simulation capital - any value for training",
+            value=10000.0,
+            step=1000.0,
+            help="Simulation capital - defaults to NEAT/main.py INITIAL_CAPITAL (10000.0)",
         )
         checkpoint_interval = st.number_input(
             "Checkpoint Interval",

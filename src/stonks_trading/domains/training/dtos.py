@@ -229,10 +229,19 @@ class TrainingJobResponse(BaseResponse):
     generations_total: int
     generations_completed: int = 0
     best_fitness: float | None = None
-    best_roi: float | None = None
+    best_roi: float | None = None  # all-time-best validation ROI (backwards compat)
     progress_pct: float = 0.0
     started_at: datetime | None = None
     estimated_completion: datetime | None = None
+
+    # Dual-winner metadata (matches NEAT/main.py final comparison)
+    all_time_best_model_id: int | None = None
+    all_time_best_roi: float | None = None
+    all_time_best_test_roi: float | None = None
+    last_winner_model_id: int | None = None
+    last_winner_roi: float | None = None  # validation ROI of last-generation winner
+    last_winner_test_roi: float | None = None
+    selected_winner: str | None = None  # "all_time_best" or "last_winner"
 
 
 class TrainingJobDetailResponse(TrainingJobResponse):

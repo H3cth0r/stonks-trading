@@ -131,6 +131,15 @@ class TrainingJob:
     error: str | None = None
     checkpoints: list[dict] = None
 
+    # Dual-winner metadata (matches NEAT/main.py final comparison)
+    all_time_best_model_id: int | None = None
+    all_time_best_roi: float | None = None
+    all_time_best_test_roi: float | None = None
+    last_winner_model_id: int | None = None
+    last_winner_roi: float | None = None
+    last_winner_test_roi: float | None = None
+    selected_winner: str | None = None
+
     def __post_init__(self):
         if self.checkpoints is None:
             self.checkpoints = []

@@ -625,6 +625,13 @@ class TrainingProcessManager:
                 else None,
                 error=job_data.get("error"),
                 checkpoints=job_data.get("checkpoints", []),
+                all_time_best_model_id=job_data.get("all_time_best_model_id"),
+                all_time_best_roi=job_data.get("all_time_best_roi"),
+                all_time_best_test_roi=job_data.get("all_time_best_test_roi"),
+                last_winner_model_id=job_data.get("last_winner_model_id"),
+                last_winner_roi=job_data.get("last_winner_roi"),
+                last_winner_test_roi=job_data.get("last_winner_test_roi"),
+                selected_winner=job_data.get("selected_winner"),
             )
 
         except Exception as e:
