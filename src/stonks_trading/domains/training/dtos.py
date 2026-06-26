@@ -209,9 +209,15 @@ class TrainingJobRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=20)
     generations: int = Field(default=30, ge=1, le=100)
     population_size: int = Field(default=150, ge=10, le=500)
-    training_capital: float = Field(default=100000.0, ge=1000)
+    training_capital: float = Field(default=10000.0, ge=1000)
     checkpoint_interval: int = Field(default=5, ge=1, le=10)
     strategy_type: str = Field(default="neat_swing", min_length=1, max_length=50)
+    csv_path: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+        description="Optional CSV path to load training data exactly like NEAT/main.py",
+    )
 
 
 class TrainingJobResponse(BaseResponse):
@@ -223,6 +229,7 @@ class TrainingJobResponse(BaseResponse):
     generations_total: int
     generations_completed: int = 0
     best_fitness: float | None = None
+    best_roi: float | None = None
     progress_pct: float = 0.0
     started_at: datetime | None = None
     estimated_completion: datetime | None = None

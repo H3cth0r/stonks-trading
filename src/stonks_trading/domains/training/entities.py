@@ -155,6 +155,7 @@ class StartTrainingRequest:
     training_capital: float
     checkpoint_interval: int
     strategy_type: str = "neat_swing"
+    csv_path: str | None = None
 
 
 @dataclass

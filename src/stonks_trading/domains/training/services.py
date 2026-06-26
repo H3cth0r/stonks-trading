@@ -410,20 +410,28 @@ class TrainingDataProvider:
         return df
 
     def _ensure_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Ensure all required features exist in DataFrame.
+        """Ensure all required features exist and are populated.
 
-        If features are missing, compute them using engineer_features.
+        Recomputes features using engineer_features when required columns are
+        missing or when any required feature contains NaN values. This guards
+        against training on stale/corrupted DuckDB rows that were inserted
+        without features (e.g., raw massive backfill candles).
 
         Args:
             df: DataFrame with OHLCV data
 
         Returns:
-            DataFrame with all required features
+            DataFrame with all required features computed
         """
-        if all(feat in df.columns for feat in self.REQUIRED_FEATURES):
-            return df
+        if not all(feat in df.columns for feat in self.REQUIRED_FEATURES):
+            return engineer_features(df)
 
-        return engineer_features(df)
+        if df[self.REQUIRED_FEATURES].isna().any().any():
+            # Drop stale/null feature columns so engineer_features can recreate them.
+            df = df.drop(columns=[c for c in self.REQUIRED_FEATURES if c in df.columns])
+            return engineer_features(df)
+
+        return df
 
 
 class CheckpointManager:
@@ -520,6 +528,7 @@ class TrainingProcessManager:
         training_capital: float,
         checkpoint_interval: int,
         strategy_type: str = "neat_swing",
+        csv_path: str | None = None,
     ):
         """Start training by delegating to Worker.
 
@@ -530,6 +539,7 @@ class TrainingProcessManager:
             training_capital: Initial capital for training
             checkpoint_interval: Save checkpoint every N generations
             strategy_type: Strategy type (default: "neat_swing")
+            csv_path: Optional CSV path to load data exactly like NEAT/main.py
 
         Returns:
             TrainingJob with job_id for polling
@@ -538,6 +548,7 @@ class TrainingProcessManager:
             f"Delegating training for {symbol} to Worker",
             generations=generations,
             population_size=population_size,
+            csv_path=csv_path,
         )
 
         request = StartTrainingRequest(
@@ -547,6 +558,7 @@ class TrainingProcessManager:
             training_capital=training_capital,
             checkpoint_interval=checkpoint_interval,
             strategy_type=strategy_type,
+            csv_path=csv_path,
         )
 
         try:
@@ -560,6 +572,7 @@ class TrainingProcessManager:
                         "training_capital": request.training_capital,
                         "checkpoint_interval": request.checkpoint_interval,
                         "strategy_type": request.strategy_type,
+                        "csv_path": request.csv_path,
                     },
                     timeout=30.0,
                 )

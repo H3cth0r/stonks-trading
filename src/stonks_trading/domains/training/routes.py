@@ -516,6 +516,7 @@ async def start_training_job_endpoint(
         training_capital=request.training_capital,
         checkpoint_interval=request.checkpoint_interval,
         strategy_type=request.strategy_type,
+        csv_path=request.csv_path,
     )
 
     return TrainingJobResponse(
@@ -560,6 +561,7 @@ async def list_training_jobs_endpoint(
                         "generations_total": job_data.get("generations_total"),
                         "generations_completed": job_data.get("generations_completed"),
                         "best_fitness": job_data.get("best_fitness"),
+                        "best_roi": job_data.get("best_roi"),
                         "progress_pct": job_data.get("progress_pct"),
                         "started_at": job_data.get("started_at"),
                         "checkpoints": job_data.get("checkpoints", []),
@@ -610,6 +612,7 @@ async def get_training_job_endpoint(
         generations_total=job_data.generations_total,
         generations_completed=job_data.generations_completed,
         best_fitness=job_data.best_fitness,
+        best_roi=job_data.best_roi,
         progress_pct=job_data.progress_pct,
         started_at=job_data.started_at,
         checkpoints=checkpoints,

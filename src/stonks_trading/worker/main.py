@@ -306,6 +306,8 @@ def get_worker_router() -> APIRouter:
             "--strategy-type",
             request.get("strategy_type", "neat_swing"),
         ]
+        if request.get("csv_path"):
+            cmd.extend(["--csv-path", request["csv_path"]])
 
         try:
             process = await asyncio.create_subprocess_exec(
