@@ -282,6 +282,24 @@ class SelectCheckpointResponse(BaseResponse):
     message: str
 
 
+class WinnerActivationRequest(BaseModel):
+    """Request to activate a final winner genome from a training job."""
+
+    winner: str = Field(..., pattern=r"^(all_time_best|last_winner)$")
+    bot_type: str = Field(default="neat_swing", min_length=1, max_length=50)
+    bot_instance_id: str = Field(default="default", min_length=1, max_length=100)
+
+
+class WinnerActivationResponse(BaseResponse):
+    """Response after activating a final winner genome."""
+
+    job_id: str
+    winner: str
+    model_id: int
+    activated: bool
+    message: str
+
+
 class TrainingPlotResponse(BaseResponse):
     """Training plot response with Plotly HTML."""
 

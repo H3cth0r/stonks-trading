@@ -41,6 +41,8 @@ from stonks_trading.domains.training.dtos import (
     TrainingRunRequest,
     TriggerRetrainingRequest,
     TriggerRetrainingResponse,
+    WinnerActivationRequest,
+    WinnerActivationResponse,
 )
 from stonks_trading.domains.training.entities import RetrainingJob
 from stonks_trading.domains.training.mappers import (
@@ -51,6 +53,7 @@ from stonks_trading.domains.training.mappers import (
     TriggerRetrainingMapper,
 )
 from stonks_trading.domains.training.repositories import (
+    activate_genome_for_context,
     list_training_runs,
 )
 from stonks_trading.domains.training.scheduler_integration import (
@@ -781,6 +784,71 @@ async def stop_training_job_endpoint(
     )
 
 
+@router.post(
+    "/async-training-jobs/{job_id}/activate-winner",
+    response_model=WinnerActivationResponse,
+)
+async def activate_winner_endpoint(
+    request: WinnerActivationRequest,
+    job_id: str = FastAPIPath(..., min_length=1),
+) -> WinnerActivationResponse:
+    """Activate the all-time-best or last-winner genome from a completed job.
+
+    Looks up the model_id already persisted for the chosen winner and activates
+    it for the given bot context, mirroring POST /api/v1/models/{id}/activate.
+    """
+    manager = get_training_process_manager()
+    job_data = await manager.get_job_status(job_id)
+
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found",
+        )
+
+    if job_data.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Training job {job_id} is not completed (status={job_data.status})",
+        )
+
+    model_id: int | None = None
+    if request.winner == "all_time_best":
+        model_id = job_data.all_time_best_model_id
+    elif request.winner == "last_winner":
+        model_id = job_data.last_winner_model_id
+
+    if not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No {request.winner} model found for job {job_id}",
+        )
+
+    bot_context = BotContext(
+        bot_type=request.bot_type,
+        instance_id=request.bot_instance_id,
+    )
+
+    success = await activate_genome_for_context(
+        genome_id=model_id,
+        bot_context=bot_context,
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to activate model {model_id}",
+        )
+
+    return WinnerActivationResponse(
+        job_id=job_id,
+        winner=request.winner,
+        model_id=model_id,
+        activated=True,
+        message=f"Activated {request.winner} model {model_id} for {bot_context.bot_type}/{bot_context.instance_id}",
+    )
+
+
 # =============================================================================
 # Training Plot Endpoints (Phase 3)
 # =============================================================================
@@ -895,6 +963,54 @@ async def get_checkpoint_plot_endpoint(
         if checkpoint and checkpoint.get("created_at")
         else datetime.utcnow(),
     )
+
+
+@router.get(
+    "/async-training-jobs/{job_id}/test-plots/{winner}",
+    response_model=TrainingPlotResponse,
+)
+async def get_test_plot_endpoint(
+    job_id: str = FastAPIPath(..., min_length=1),
+    winner: str = FastAPIPath(..., pattern=r"^(all-time-best|last-winner)$"),
+) -> TrainingPlotResponse:
+    """Serve the final test-set plot for the chosen winner.
+
+    Returns the pre-generated Plotly HTML that was saved at the end of training
+    for either the all-time-best genome or the last-generation winner.
+    """
+    manager = get_training_process_manager()
+    job_data = await manager.get_job_status(job_id)
+
+    if not job_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Training job {job_id} not found",
+        )
+
+    filename = (
+        "test_all_time_best_plot.html"
+        if winner == "all-time-best"
+        else "test_last_winner_plot.html"
+    )
+    plot_file = Path(f"/app/data/training/{job_id}/{filename}")
+
+    if not plot_file.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Test plot for {winner} not found for job {job_id}",
+        )
+
+    plot_html = plot_file.read_text()
+
+    return TrainingPlotResponse(
+        job_id=job_id,
+        plot_html=plot_html,
+        generation=job_data.generations_completed,
+        fitness=None,
+        created_at=datetime.utcnow(),
+    )
+
+
 
 
 @router.get(

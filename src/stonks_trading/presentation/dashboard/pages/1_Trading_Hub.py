@@ -4,6 +4,7 @@ Phase 10C: Consolidates Portfolio Overview, Live Trading, and Strategy Managemen
 """
 
 from time import sleep
+from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -337,6 +338,109 @@ with tab_training:
                 if status == "running":
                     sleep(2)
                     st.rerun()
+
+                # Final Winners panel (only when completed)
+                if status == "completed":
+                    st.divider()
+                    st.subheader("🏆 Final Winners (Test Split)")
+
+                    selected_winner = job_data.get("selected_winner")
+
+                    col_atb, col_lw = st.columns(2)
+
+                    def _render_winner_card(
+                        col: Any,
+                        title: str,
+                        winner_key: str,
+                        model_id_key: str,
+                        val_roi_key: str,
+                        test_roi_key: str,
+                        job_id: str,
+                    ) -> None:
+                        with col:
+                            is_selected = selected_winner == winner_key
+                            header = f"**{title}**"
+                            if is_selected:
+                                st.success(f"{header} ✅ Selected Winner")
+                            else:
+                                st.info(header)
+
+                            model_id = job_data.get(model_id_key)
+                            val_roi = job_data.get(val_roi_key)
+                            test_roi = job_data.get(test_roi_key)
+
+                            if model_id:
+                                st.write(f"Model ID: `{model_id}`")
+                            if val_roi is not None:
+                                st.metric("Validation ROI", f"{val_roi:.2f}%")
+                            if test_roi is not None:
+                                st.metric("Test ROI", f"{test_roi:.2f}%")
+
+                            # Fetch full model metadata for trade stats
+                            if model_id:
+                                model_detail = fetch_sync(f"/api/v1/models/{model_id}")
+                                if model_detail:
+                                    col_a, col_b = st.columns(2)
+                                    with col_a:
+                                        st.metric(
+                                            "Trades",
+                                            model_detail.get("num_trades", "N/A"),
+                                        )
+                                    with col_b:
+                                        mdd = model_detail.get("max_drawdown")
+                                        st.metric(
+                                            "Max Drawdown",
+                                            f"{mdd * 100:.2f}%" if mdd is not None else "N/A",
+                                        )
+
+                            # Load and render the pre-generated test plot
+                            plot_data = fetch_sync(
+                                f"/api/v1/training/async-training-jobs/{job_id}/test-plots/{winner_key.replace('_', '-')}"
+                            )
+                            if plot_data and plot_data.get("plot_html"):
+                                st.caption("Test-set equity curve")
+                                st.components.v1.html(
+                                    plot_data["plot_html"], height=420, scrolling=True
+                                )
+                            else:
+                                st.caption("Test plot not yet available")
+
+                            if model_id and st.button(
+                                f"Activate {title}",
+                                key=f"activate_{winner_key}_{job_id}",
+                                type="primary" if is_selected else "secondary",
+                            ):
+                                result = post_sync(
+                                    f"/api/v1/training/async-training-jobs/{job_id}/activate-winner",
+                                    {"winner": winner_key},
+                                )
+                                if result and result.get("activated"):
+                                    st.success(
+                                        f"Activated {title} (model {result.get('model_id')})!"
+                                    )
+                                else:
+                                    st.error(
+                                        f"Activation failed: {result.get('message', 'unknown error')}"
+                                    )
+
+                    _render_winner_card(
+                        col_atb,
+                        "All-Time Best",
+                        "all_time_best",
+                        "all_time_best_model_id",
+                        "all_time_best_roi",
+                        "all_time_best_test_roi",
+                        job_id,
+                    )
+                    _render_winner_card(
+                        col_lw,
+                        "Last-Generation Winner",
+                        "last_winner",
+                        "last_winner_model_id",
+                        "last_winner_roi",
+                        "last_winner_test_roi",
+                        job_id,
+                    )
 
                 # Clear button
                 if status in ["completed", "failed"] and st.button("Clear Job"):
